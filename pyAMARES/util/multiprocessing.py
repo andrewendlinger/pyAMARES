@@ -1,10 +1,12 @@
-import sys
 import contextlib
+import sys
+from concurrent.futures import ProcessPoolExecutor
 from copy import deepcopy
 from datetime import datetime
-from concurrent.futures import ProcessPoolExecutor
 
 import numpy as np
+from joblib import Parallel, delayed
+from tqdm.auto import tqdm
 
 from ..kernel.lmfit import fitAMARES
 
@@ -27,7 +29,14 @@ def redirect_stdout_to_file(filename):
             sys.stdout, sys.stderr = old_stdout, old_stderr
 
 
-def fit_dataset(fid_current, FIDobj_shared, initial_params, method="leastsq", initialize_with_lm=False, objective_func=None):
+def fit_dataset(
+    fid_current,
+    FIDobj_shared,
+    initial_params,
+    method="leastsq",
+    initialize_with_lm=False,
+    objective_func=None,
+):
     """
     Fits a dataset to a shared FID Parameter object using the AMARES algorithm
     with specified initial parameters and fitting method.
@@ -42,7 +51,7 @@ def fit_dataset(fid_current, FIDobj_shared, initial_params, method="leastsq", in
         FIDobj_shared (FID object): A shared FID object template to be used for fitting. This object should contain common settings and parameters applicable to all datasets.
         initial_params (lmfit.Parameters): Initial fitting parameters for the AMARES algorithm.
         method (str, optional): The fitting method to be used. Defaults to "leastsq" (Levenberg-Marquardt).
-        initialize_with_lm (bool, optional, default False, new in 0.3.9): If True, a Levenberg-Marquardt initializer (``least_sq``) is executed internally. See ``pyAMARES.lmfit.fitAMARES`` for details. 
+        initialize_with_lm (bool, optional, default False, new in 0.3.9): If True, a Levenberg-Marquardt initializer (``least_sq``) is executed internally. See ``pyAMARES.lmfit.fitAMARES`` for details.
         objective_func (callable, optional): Custom objective function for ``pyAMARES.lmfit.fitAMARES``. If None,
           the default objective function will be used. Defaults to None.
 
@@ -61,7 +70,7 @@ def fit_dataset(fid_current, FIDobj_shared, initial_params, method="leastsq", in
                 fid_parameters=FIDobj_current,
                 fitting_parameters=initial_params,
                 method=method,  # Use method passed as a parameter to the function
-                initialize_with_lm=initialize_with_lm, # New in 0.3.9
+                initialize_with_lm=initialize_with_lm,  # New in 0.3.9
                 ifplot=False,
                 inplace=True,
             )
@@ -70,10 +79,10 @@ def fit_dataset(fid_current, FIDobj_shared, initial_params, method="leastsq", in
                 fid_parameters=FIDobj_current,
                 fitting_parameters=initial_params,
                 method=method,  # Use method passed as a parameter to the function
-                initialize_with_lm=initialize_with_lm, # New in 0.3.9
+                initialize_with_lm=initialize_with_lm,  # New in 0.3.9
                 ifplot=False,
                 inplace=True,
-                objective_func=objective_func
+                objective_func=objective_func,
             )
 
         result_table = FIDobj_current.result_multiplets
@@ -110,8 +119,8 @@ def run_parallel_fitting_with_progress(
           parameters applicable to all datasets.
         initial_params (lmfit.Parameters): Initial fitting parameters for the AMARES algorithm.
         method (str, optional): The fitting method to be used. Defaults to 'leastsq' (Levenberg-Marquardt).
-        initialize_with_lm (bool, optional, default False, new in 0.3.9): 
-          If True, a Levenberg-Marquardt initializer (``least_sq``) is executed internally. See ``pyAMARES.lmfit.fitAMARES`` for details. 
+        initialize_with_lm (bool, optional, default False, new in 0.3.9):
+          If True, a Levenberg-Marquardt initializer (``least_sq``) is executed internally. See ``pyAMARES.lmfit.fitAMARES`` for details.
         num_workers (int, optional): The number of worker processes to use in parallel processing. Defaults to 8.
         logfilename (str, optional): The name of the file where the progress log is saved. Defaults to 'multiprocess_log.txt'.
         objective_func (callable, optional): Custom objective function for ``pyAMARES.lmfit.fitAMARES``. If None,
@@ -163,3 +172,73 @@ def run_parallel_fitting_with_progress(
         % (len(fid_arrs), num_workers, (timeafter - timebefore).total_seconds())
     )
     return results
+
+
+def run_parallel_fitting_with_progress_v2(
+    fid_arrs,
+    FIDobj_shared,
+    initial_params,
+    method="leastsq",
+    initialize_with_lm=False,
+    num_workers=8,
+    logfilename="multiprocess_log.txt",
+    objective_func=None,
+):
+    """
+    Runs parallel AMARES fitting on multiple FID datasets with N dimensions, and returns
+    a result array of the same shape as the input with the full Namespace result.
+    """
+    FIDobj_shared = deepcopy(FIDobj_shared)
+    for attr in ("styled_df", "simple_df"):
+        try:
+            delattr(FIDobj_shared, attr)
+        except AttributeError:
+            pass
+
+    timebefore = datetime.now()
+
+    # Generate the list of arguments for each fid array
+    shape = fid_arrs.shape
+    args_list = [
+        (
+            fid_arrs[tuple(idx)],
+            FIDobj_shared,
+            initial_params,
+            method,
+            initialize_with_lm,
+            objective_func,
+            idx,
+        )
+        for idx in np.ndindex(
+            shape[:-1]
+        )  # Iterate over all indices except the last dimension (FID)
+    ]
+
+    import warnings
+
+    # Run the parallel fitting
+    with redirect_stdout_to_file(logfilename):
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            results = Parallel(n_jobs=num_workers, backend="loky")(
+                delayed(fit_dataset)(*args)
+                for args in tqdm(args_list, desc="Processing Datasets")
+            )
+
+    # Store results as a full Namespace
+    result_shape = shape[:-1]  # The shape without the FID dimension
+    result_array = np.empty(
+        result_shape, dtype=object
+    )  # Store Namespace objects in the result array
+
+    # Assign the results to the corresponding positions in the result array
+    for idx, res in zip(np.ndindex(result_shape), results):
+        result_array[idx] = res  # Store the entire Namespace object for each result
+
+    timeafter = datetime.now()
+    print(
+        "Fitting %i datasets with %i processors took %i seconds"
+        % (np.prod(shape[:-1]), num_workers, (timeafter - timebefore).total_seconds())
+    )
+
+    return result_array
