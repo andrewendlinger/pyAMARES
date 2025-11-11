@@ -7,6 +7,7 @@ on:
         description: 'Python versions to test'
         required: false
         default: "['3.11', '3.12', '3.13', '3.14']"
+        type: string
 
 jobs:
   test-notebooks:
