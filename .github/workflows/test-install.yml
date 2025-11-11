@@ -2,9 +2,7 @@ name: Test Installation
 
 on:
   push:
-    branches:
-      - dev
-      - main
+    branches: [main, dev]
 
 jobs:
   test:
