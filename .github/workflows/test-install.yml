@@ -13,8 +13,8 @@ jobs:
     strategy:
       matrix:
         # see https://docs.github.com/en/actions/using-github-hosted-runners/using-github-hosted-runners
-        os: [ubuntu-latest, windows-latest, macos-13, macos-latest]
-        python-version: ["3.9", "3.11"]
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python-version: ['3.11', '3.12', '3.13', '3.14']
 
     steps:
       - name: Checkout code
