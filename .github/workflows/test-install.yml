@@ -17,20 +17,19 @@ jobs:
         python-version: ["3.9", "3.11"]
 
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: ${{ matrix.python-version }}
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
 
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip setuptools wheel
-        python -m pip install .
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip setuptools wheel
+          python -m pip install .
 
-    - name: Verify installation
-      run: |
-        python -c "import pyAMARES"
-
+      - name: Verify installation
+        run: |
+          python -c "import pyAMARES"
