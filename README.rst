@@ -30,7 +30,7 @@ Requirements
    :alt: Ruff
 
 .. note::
-   PyAMARES requires Python 3.9 or newer. If you are using an older version of Python, you will need to upgrade to use pyAMARES.
+   PyAMARES requires Python 3.11 or newer. If you are using an older version of Python, you will need to upgrade to use pyAMARES.
 
 Installation
 ------------

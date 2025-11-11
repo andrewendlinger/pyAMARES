@@ -18,7 +18,7 @@ __________________
 
       It is recommended to create a Python environment using `Anaconda or Miniconda <https://docs.anaconda.com/anaconda/install/index.html>`_.
 
-      PyAMARES requires Python 3.9 or higher. To create a new ``conda`` environment with Python 3.12, follow these steps:
+      PyAMARES requires Python 3.11 or higher. To create a new ``conda`` environment with Python 3.12, follow these steps:
 
       1. Open a terminal window.
 
