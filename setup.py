@@ -93,8 +93,7 @@ install_requires = [
     "ipython",
     "ipykernel",
     "requests",
-    "ipywidgets>=7.6.0,<8.0.0;python_version<'3.11'",  # For older Python versions
-    "ipywidgets>=8.0.0;python_version>='3.11'",  # For newer Python versions
+    "ipywidgets>=8.0.0",
 ]
 
 # Use the better-performing 'hlsvdpro' package if running on supported platforms
@@ -119,15 +118,15 @@ setup(
     packages=find_packages(),
     classifiers=[
         "Programming Language :: Python :: 3",
-        "Programming Language :: Python :: 3.9",
-        "Programming Language :: Python :: 3.10",
         "Programming Language :: Python :: 3.11",
         "Programming Language :: Python :: 3.12",
+        "Programming Language :: Python :: 3.13",
+        "Programming Language :: Python :: 3.14",
         "Topic :: Scientific/Engineering",
         "License :: OSI Approved :: BSD License",
         "Operating System :: OS Independent",
     ],
-    python_requires=">=3.9",  # Minimum Python version requirement
+    python_requires=">=3.11",  # Minimum Python version requirement
     install_requires=install_requires,
     extras_require={
         "docs": doc_requirements,
