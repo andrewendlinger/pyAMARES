@@ -6,14 +6,14 @@
 		{
 			"label": "build doc",
 			"type": "shell",
-			"command": "/home/xujia/miniconda3/envs/mrs/bin/sphinx-build docs/source/ docs/build",
+			"command": "/home/xujia/miniconda3/envs/py312/bin/sphinx-build docs/source/ docs/build",
 			"problemMatcher": []
 		},
 
 		{
 			"label": "build all doc",
 			"type": "shell",
-			"command": "/home/xujia/miniconda3/envs/mrs/bin/sphinx-build -a docs/source/ docs/build",
+			"command": "/home/xujia/miniconda3/envs/py312/bin/sphinx-build -a docs/source/ docs/build",
 			"problemMatcher": []
 		}
 	]

@@ -30,7 +30,20 @@ Requirements
    :alt: Ruff
 
 .. note::
-   PyAMARES requires Python 3.8 or newer. If you are using an older version of Python, you will need to upgrade to use pyAMARES.
+   PyAMARES requires Python 3.8 or newer. We recommend using Python 3.11 or newer. If you are using an older version of Python, you will need to upgrade to use pyAMARES.
+
+.. warning::
+   **Python 3.6 and 3.7 Users**
+   
+   If you are using Python 3.6 or 3.7, please use our legacy branch ``legacy2025`` (version 0.3.29):
+   
+   .. code-block:: bash
+   
+      python -m pip install git+https://github.com/HawkMRS/pyAMARES.git@legacy2025#egg=pyAMARES
+
+   The legacy branch is maintained for critical bug fixes only. For the latest features and improvements, 
+   we strongly recommend upgrading to Python 3.11 or newer.
+
 
 Installation
 ------------
