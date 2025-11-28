@@ -21,7 +21,7 @@ Getting Started
 Requirements
 ------------
 
-.. image:: https://img.shields.io/badge/Python->%3D3.6%2C%203.8+-blue.svg
+.. image:: https://img.shields.io/badge/Python-3.8+%20(3.11+%20recommended)-blue.svg
    :target: https://python.org
    :alt: Python Version
 
@@ -33,9 +33,8 @@ Requirements
    PyAMARES requires Python 3.8 or newer. We recommend using Python 3.11 or newer. If you are using an older version of Python, you will need to upgrade to use pyAMARES.
 
 .. warning::
-   **Python 3.6 and 3.7 Users**
-   
-   If you are using Python 3.6 or 3.7, please use our legacy branch ``legacy2025`` (version 0.3.29):
+
+      If you require Python 3.6 or 3.7 compatibility for older systems, please use the ``legacy2025`` branch (version 0.3.29):
    
    .. code-block:: bash
    

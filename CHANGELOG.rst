@@ -9,8 +9,6 @@ v0.3.32
   - Modernized CI/CD workflows with reusable workflows and new triggers.
   - Created a legacy branch ``legacy2025`` and labeled it as ``v0.3.29-legacy2025`` for users who need to maintain compatibility with Python 3.6 and 3.7.
 
-
-
 **Fixed**
   - Fixed a bug that ``.vscode`` is not ignored in the ``.gitignore`` file.
 
