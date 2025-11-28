@@ -2,7 +2,7 @@ name: Auto Test Installation
 
 on:
   push:
-    branches: [main, dev]
+    branches: [main, dev, pr-9-rev] # temporarily add pr-9-rev for testing
 
 jobs:
   test-install:
