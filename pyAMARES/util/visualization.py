@@ -172,11 +172,12 @@ def combined_plot(
           filename (str or None, optional): If provided, the figure will be saved to this file. Defaults to None.
     """
     # print(f"{xlim=}")
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8), sharex=True)
+    fig, (ax1, ax2) = plt.subplots(
+        2, 1, figsize=(10, 8), sharex=True, layout="constrained"
+    )
 
     plot_fit(ax1, fid, fid_fit, ppm, xlim, mode, label, plotParameters=plotParameters)
     preview_HSVD(ax2, hsvdarr, ppm, p_pd, xlim)
-    plt.tight_layout()
     plt.suptitle(title)
     plt.xlabel(xlabel)
     if filename is not None:

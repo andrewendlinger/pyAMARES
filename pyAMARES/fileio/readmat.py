@@ -44,28 +44,30 @@ def readmrs(filename):
     """
     if filename.endswith("csv"):
         # print("Try to load 2-column CSV")
-        logger.info("Try to load 2-column CSV")
+        logger.debug("Try to load 2-column CSV")
         data = np.loadtxt(filename, delimiter=",")
         data = data[:, 0] + 1j * data[:, 1]
     elif filename.endswith("txt"):
         # print("Try to load 2-column ASCII data")
-        logger.info("Try to load 2-column ASCII data")
+        logger.debug("Try to load 2-column ASCII data")
         data = np.loadtxt(filename, delimiter=" ")
         data = data[:, 0] + 1j * data[:, 1]
     elif filename.endswith("npy"):
         # print("Try to load python NPY file")
-        logger.info("Try to load python NPY file")
+        logger.debug("Try to load python NPY file")
         data = np.load(filename)
     elif filename.endswith("mat"):
         if is_mat_file_v7_3(filename):
             # print("Try to load Matlab V7.3 mat file with the var saved as fid or data")
-            logger.info(
+            logger.debug(
                 "Try to load Matlab V7.3 mat file with the var saved as fid or data"
             )
             matdic = mat73.loadmat(filename)
         else:
             # print("Try to load Matlab mat file with the var saved as fid or data")
-            logger.info("Try to load Matlab mat file with the var saved as fid or data")
+            logger.debug(
+                "Try to load Matlab mat file with the var saved as fid or data"
+            )
             matdic = io.loadmat(filename)
         if "fid" in matdic.keys() and "data" in matdic.keys():
             data = matdic["fid"].squeeze().astype("complex")
@@ -86,5 +88,5 @@ def readmrs(filename):
         )
 
     # print("data.shape=", data.shape)
-    logger.info("data.shape=%s", data.shape)
+    logger.debug("data.shape=%s", data.shape)
     return data

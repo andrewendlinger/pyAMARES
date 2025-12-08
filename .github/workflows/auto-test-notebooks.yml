@@ -2,7 +2,7 @@ name: Auto Test Notebooks
 
 on:
   push:
-    branches: [main, dev]
+    branches: [main, dev] # temporarily add pr-9-rev for testing
   pull_request:
     branches: [main]
 

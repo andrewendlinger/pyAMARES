@@ -129,7 +129,7 @@ def evaluateCRB(outparams, opts, P=None, Jacfunc=Jac6, verbose=False):
     opts.D = Jacfunc(outparams, opts.timeaxis)
     opts.residual = uninterleave(multieq6(outparams, opts.timeaxis)) - opts.fid
     if opts.noise_var.startswith("OXSA"):
-        logger.info(
+        logger.debug(
             "Estimated CRLBs are calculated using the default noise variance "
             "estimation used by OXSA."
         )
@@ -137,7 +137,7 @@ def evaluateCRB(outparams, opts, P=None, Jacfunc=Jac6, verbose=False):
         # OXSA style, the "noise as SD in TD from TD residue" option selected in the
         # Result Window of jMRUI V7.
     elif opts.noise_var.lower().startswith("jmrui"):
-        logger.info(
+        logger.debug(
             "Estimated CRLBs are calculated using the default noise variance "
             "estimation used by jMRUI."
         )
@@ -147,12 +147,12 @@ def evaluateCRB(outparams, opts, P=None, Jacfunc=Jac6, verbose=False):
     else:
         try:
             opts.variance = float(opts.noise_var)
-            logger.info(
+            logger.debug(
                 "The CRLB estimation will be divided by the input variance %s"
                 % opts.variance
             )
         except ValueError:
-            logger.info(
+            logger.error(
                 "Error: noise_var %s is not a recognized string or a valid number."
                 % opts.variance
             )

@@ -31,3 +31,4 @@ __pycache__
 !requirements.txt
 .jupyter_cache
 tests/multiprocess_log.txt
+.vscode

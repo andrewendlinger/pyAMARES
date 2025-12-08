@@ -6,7 +6,7 @@ on:
       python-versions:
         description: 'Python versions to test'
         required: false
-        default: "['3.11', '3.12', '3.13', '3.14']"
+        default: "['3.8', '3.9', '3.10', '3.11', '3.12', '3.13', '3.14']"
         type: string
 
 jobs:
@@ -15,7 +15,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: [ubuntu-latest, windows-latest, macos-latest] # Drop intel macOS unless needed
         python-version: ${{ fromJson(inputs.python-versions) }}
 
     steps:

@@ -1,6 +1,46 @@
 Latest Changes
 --------------
 
+v0.3.32
+~~~~~~~
+
+**Added**
+  - Added support for Python 3.13 and 3.14.
+  - Modernized CI/CD workflows with reusable workflows and new triggers.
+  - Created a legacy branch ``legacy2025`` and labeled it as ``v0.3.29-legacy2025`` for users who need to maintain compatibility with Python 3.6 and 3.7.
+
+**Fixed**
+  - Fixed a bug that ``.vscode`` is not ignored in the ``.gitignore`` file.
+
+**Changed**
+  - Updated minimum Python version requirement from 3.6 to 3.8 across all configuration files
+  - Updated recommended Python version from 3.8 to 3.12. 
+  - Expanded test matrix to cover Python 3.8-3.14 on Ubuntu, Windows, and macOS.
+  - Removed older Intel-based macOS (``macos-13``) from test matrix. 
+  - Changed the default python version for readthedocs from 3.8 to 3.12
+  - Updated documentation to reflect the new minimum and recommended Python versions, and added notes for legacy users to download the ``legacy2025`` branch when needed.
+
+Thanks to `@bastigw`_ for contributing this version in `PR #9`_.
+
+.. _PR #9: https://github.com/HawkMRS/pyAMARES/pull/9
+.. _@bastigw: https://github.com/bastigw
+
+v0.3.31
+~~~~~~~
+**Fixed**
+  - Fixed a bug in the web interface where non-``.txt`` format FIDs were incorrectly identified as ``.txt`` files, causing program crashes.
+  - Fixed a bug in both the web interface and command-line script where the code attempted to access non-existent ``result_sum`` and ``simple_pd`` from the fitted result object.
+
+v0.3.30
+~~~~~~~
+**Added** 
+  - Added a new "Simple FID Simulation" mode to the Streamlit app ``script/amaresfit_gui.py``. This mode allows users to simulate FIDs using prior knowledge dataset and perturbed the parameters.
+s needed
+  - Added ``extra_line_broadening`` to ``fid.simulate_fid`` to allow users to add extra line broadening to the simulated FID before adding noise. This avoid SNR bias introduced by extra global linebroadening factors.
+
+**Fixed**
+  - Fixed a bug in the Streamlit app where editing prior knowledge (PK) would remove ``#`` symbols from comment rows, causing file parsing to fail when the comment line appears as the first line
+
 v0.3.29
 ~~~~~~~
 

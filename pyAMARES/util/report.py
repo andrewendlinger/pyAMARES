@@ -255,7 +255,7 @@ def report_amares(outparams, fid_parameters, verbose=False):
             result["phase_sd"], min_deg=min_deg, max_deg=max_deg
         )
     except Exception as e:
-        logger.info(f"Caught an error: {e}")
+        logger.error(f"Caught an error: {e}")
         result["phase_sd"] = np.nan
     # Change 'g_CRLB(%)' values to NaN where they are 0.0
     result.loc[result["g_CRLB(%)"] == 0.0, "g_CRLB(%)"] = np.nan

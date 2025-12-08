@@ -2,12 +2,22 @@
 Installation Guide
 ==================
 
-.. image:: https://img.shields.io/badge/Python->%3D3.6%2C%203.8+-blue.svg
+.. image:: https://img.shields.io/badge/Python-3.8+%20(3.11+%20recommended)-blue.svg
    :target: https://python.org
    :alt: Python Version
 
 .. note::
-   PyAMARES requires Python 3.11 or newer. We recommend using Python 3.12 or newer. If you are using an older version of Python, you will need to upgrade to use pyAMARES.
+   PyAMARES requires Python 3.8 or newer. We recommend using Python 3.11 or newer. 
+
+.. warning::
+   If you require Python 3.6 or 3.7 compatibility for older systems, please use the ``legacy2025`` branch (version 0.3.29):
+   
+   .. code-block:: bash
+   
+      python -m pip install git+https://github.com/HawkMRS/pyAMARES.git@legacy2025#egg=pyAMARES
+
+   The legacy branch is maintained for critical bug fixes only. For the latest features and improvements, 
+   we strongly recommend upgrading to Python 3.11 or newer.
 
 
 PIP installation
@@ -18,7 +28,7 @@ __________________
 
       It is recommended to create a Python environment using `Anaconda or Miniconda <https://docs.anaconda.com/anaconda/install/index.html>`_.
 
-      PyAMARES requires Python 3.11 or higher. To create a new ``conda`` environment with Python 3.12, follow these steps:
+      PyAMARES requires Python 3.8 or higher. To create a new ``conda`` environment with Python 3.12, follow these steps:
 
       1. Open a terminal window.
 

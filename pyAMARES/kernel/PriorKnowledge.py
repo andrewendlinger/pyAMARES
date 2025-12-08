@@ -260,12 +260,12 @@ def assert_peak_format(input_str):
     """
     msg = "Error! The peak name can only use numbers as a suffix for multiplet peaks separated by J-coupling."
     if re.search(r"\.\d+$", input_str):
-        logger.info(msg)
+        logger.error(msg)
         raise ValueError(
             "The peak name %s cannot end with a floating-point number!" % input_str
         )
     if re.search(r"\d+[\D]", input_str) or re.search(r"^\d+", input_str):
-        logger.info(msg)
+        logger.error(msg)
         raise ValueError(
             "The peak name %s cannot contain numbers at the beginning or in the middle!"
             % input_str
@@ -340,7 +340,7 @@ def generateparameter(
     df_lb2 = unitconverter(df_lb, MHz=MHz)
     df_ub2 = unitconverter(df_ub, MHz=MHz)
     if g_global is False:
-        logger.info(
+        logger.debug(
             "Parameter g will be fit with the initial value set in the file %s" % fname
         )
         # print(f"Parameter g will be fit with the initial value set in the file {fname}")
@@ -359,7 +359,7 @@ def generateparameter(
                 uval = np.inf
             name = para + "_" + peak
             if (para == "ak") and scale_amplitude != 1.0:
-                logger.info(f"scale {name} from {val} to {val * scale_amplitude}")
+                logger.debug(f"scale {name} from {val} to {val * scale_amplitude}")
                 val = val * scale_amplitude
                 lval = lval * scale_amplitude
                 uval = uval * scale_amplitude
@@ -579,11 +579,11 @@ def initialize_FID(
                         opts.initialParams[p].max is not None
                     ):  # Check if there's an upper bound set
                         opts.initialParams[p].max += hz_offset
-                    logger.info(
+                    logger.debug(
                         "before opts.initialParams[%s].value=%s"
                         % (p, opts.initialParams[p].value)
                     )
-                    logger.info(
+                    logger.debug(
                         "new value should be opts.initialParams[%s].value + opts.ppm_offset * opts.MHz=%s"
                         % (p, opts.initialParams[p].value + opts.ppm_offset * opts.MHz)
                     )
@@ -596,7 +596,7 @@ def initialize_FID(
                         opts.initialParams[p].value + hz_offset
                     )
                     # print(f"after {opts.initialParams[p].value=}")
-                    logger.info(
+                    logger.debug(
                         "after opts.initialParams[%s].value=%s"
                         % (p, opts.initialParams[p].value)
                     )
