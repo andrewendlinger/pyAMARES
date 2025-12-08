@@ -374,7 +374,7 @@ def fitAMARES_kernel(
         out_obj = min_obj.minimize(method=method)
     timeafter = datetime.now()
     # print(f"Fitting with {method=} took {(timeafter - timebefore).total_seconds()} seconds")
-    logger.info(
+    logger.debug(
         "Fitting with method=%s took %s seconds"
         % (method, (timeafter - timebefore).total_seconds())
     )
