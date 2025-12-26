@@ -1,6 +1,23 @@
 Latest Changes
 --------------
 
+v0.3.33
+~~~~~~~
+
+**Fixed**
+  - Fixed ``FutureWarning`` messages from pandas
+  - Set default numeric type for prior knowledge to float
+
+**Changed**
+  - Updated logging statements to more applicable levels (e.g. INFO to DEBUG)
+  - Changed tight layout to constrained layout for figures with subplots in ``visualization.py``
+  - Simplified OS test matrix by skipping Python 3.9, 3.11, 3.13
+
+Thanks to `@bastigw`_ for contributing this version in `PR #10`_.
+
+.. _PR #10: https://github.com/HawkMRS/pyAMARES/pull/10
+.. _@bastigw: https://github.com/bastigw
+
 v0.3.32
 ~~~~~~~
 
