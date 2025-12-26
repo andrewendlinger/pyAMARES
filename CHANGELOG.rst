@@ -5,13 +5,14 @@ v0.3.33
 ~~~~~~~
 
 **Fixed**
-  - Fixed ``FutureWarning`` messages from pandas
-  - Set default numeric type for prior knowledge to float
+  - Fixed ``FutureWarning`` messages from pandas.
+  - Set default numeric type for prior knowledge to float.
 
 **Changed**
-  - Updated logging statements to more applicable levels (e.g. INFO to DEBUG)
-  - Changed tight layout to constrained layout for figures with subplots in ``visualization.py``
-  - Simplified OS test matrix by skipping Python 3.9, 3.11, 3.13
+  - Updated logging statements to more applicable levels (e.g. INFO to DEBUG).
+  - Changed tight layout to constrained layout for figures with subplots in ``visualization.py``.
+  - Simplified OS test matrix by skipping Python 3.9, 3.11, 3.13.
+  - Disabled preview for ``HSVDinitializer`` in ``tests/step2_simple.ipynb`` to reduce CI/CD failures.
 
 Thanks to `@bastigw`_ for contributing this version in `PR #10`_.
 
@@ -34,7 +35,7 @@ v0.3.32
   - Updated recommended Python version from 3.8 to 3.12. 
   - Expanded test matrix to cover Python 3.8-3.14 on Ubuntu, Windows, and macOS.
   - Removed older Intel-based macOS (``macos-13``) from test matrix. 
-  - Changed the default python version for readthedocs from 3.8 to 3.12
+  - Changed the default python version for readthedocs from 3.8 to 3.12.
   - Updated documentation to reflect the new minimum and recommended Python versions, and added notes for legacy users to download the ``legacy2025`` branch when needed.
 
 Thanks to `@bastigw`_ for contributing this version in `PR #9`_.
