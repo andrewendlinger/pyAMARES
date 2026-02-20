@@ -369,6 +369,11 @@ def generateparameter(
             lval = df_lb2[peak].iloc[i]
             uval = df_ub2[peak].iloc[i]
             expr = df_expr[peak].iloc[i]
+
+            # --- FIX: Ensure expr is None if it evaluates to NaN ---
+            if pd.isna(expr):
+                expr = None
+
             # Handle NaN values for bounds
             if np.isnan(lval):
                 lval = -np.inf
