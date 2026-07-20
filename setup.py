@@ -103,27 +103,38 @@ install_requires = [
 
 
 setup(
-    name="pyAMARES",
+    name="pyamares-xmris",
     version=__version__,
     author=__author__,
     author_email="jia-xu-1@uiowa.edu",
     description=(
-        "PyAMARES, an Open-Source Python Library for Fitting Magnetic Resonance "
-        "Spectroscopy Data"
+        "PyAMARES repackaged for clean pip installs on Apple Silicon (arm64): "
+        "hlsvdpro is made platform-conditional. A faithful BSD repackage of "
+        "HawkMRS/pyAMARES with zero algorithm changes; still 'import pyAMARES'."
     ),
-    long_description=open("README.rst").read(),
+    long_description=open("README.rst", encoding="utf-8").read(),
     long_description_content_type="text/x-rst",
-    url="https://github.com/hawkMRS/pyAMARES",  # Optional project URL
-    packages=find_packages(),
+    license="BSD-3-Clause",
+    license_files=["LICENSE.txt"],
+    url="https://github.com/andrewendlinger/pyAMARES",
+    project_urls={
+        "Upstream (original project)": "https://github.com/hawkMRS/pyAMARES",
+        "Upstream documentation": "https://pyamares.readthedocs.io/en/latest/index.html",
+        "Why this repackage exists": (
+            "https://github.com/andrewendlinger/pyAMARES/blob/pyamares-xmris/"
+            "REPACKAGE_NOTE.md"
+        ),
+    },
+    packages=find_packages(exclude=["tests", "tests.*"]),
     classifiers=[
         "Programming Language :: Python :: 3",
         "Programming Language :: Python :: 3.8",
         "Programming Language :: Python :: 3.9",
         "Programming Language :: Python :: 3.10",
         "Programming Language :: Python :: 3.11",
+        # 3.13/3.14 are intentionally not listed: the numpy<2.0 / pandas<2.2 caps
+        # below resolve to numpy 1.26.4 and pandas 2.1.4, whose wheels stop at cp312.
         "Programming Language :: Python :: 3.12",
-        "Programming Language :: Python :: 3.13",
-        "Programming Language :: Python :: 3.14",
         "Topic :: Scientific/Engineering",
         "License :: OSI Approved :: BSD License",
         "Operating System :: OS Independent",

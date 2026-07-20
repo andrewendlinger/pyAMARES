@@ -1,6 +1,16 @@
 **PyAMARES**, an Open-Source Python Library for Fitting Magnetic Resonance Spectroscopy Data
 ********************************************************************************************
 
+.. note::
+
+   **This is** ``pyamares-xmris``, **a repackage — not the original project.** It is a
+   faithful BSD repackage of `HawkMRS/pyAMARES <https://github.com/hawkMRS/pyAMARES>`_ whose
+   only substantive difference is that ``hlsvdpro`` is declared with a PEP 508 environment
+   marker, so that ``pip install`` succeeds on Apple Silicon (arm64). **There are no source
+   or algorithm changes, and the import name is still** ``import pyAMARES``. See
+   `REPACKAGE_NOTE.md <https://github.com/andrewendlinger/pyAMARES/blob/pyamares-xmris/REPACKAGE_NOTE.md>`_
+   for the full rationale, and please cite the original authors.
+
 .. image:: https://raw.githubusercontent.com/HawkMRS/pyAMARES/main/pyAMARES_logo.svg
    :width: 400
 
@@ -49,7 +59,10 @@ Installation
 
 .. code-block:: bash
 
-   pip install pyAMARES
+   pip install pyamares-xmris
+
+(The import name remains ``pyAMARES``. To install the original upstream distribution
+instead, use ``pip install pyAMARES`` — note that it does not install on arm64.)
 
 See the `Installation Guide <https://pyamares.readthedocs.io/en/latest/install.html>`_ for detailed information.
 
