@@ -120,9 +120,9 @@ setup(
     project_urls={
         "Upstream (original project)": "https://github.com/hawkMRS/pyAMARES",
         "Upstream documentation": "https://pyamares.readthedocs.io/en/latest/index.html",
-        "Why this repackage exists": (
+        "Divergence from upstream": (
             "https://github.com/andrewendlinger/pyAMARES/blob/pyamares-xmris/"
-            "REPACKAGE_NOTE.md"
+            "DIVERGENCE.md"
         ),
     },
     packages=find_packages(exclude=["tests", "tests.*"]),

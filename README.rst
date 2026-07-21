@@ -7,9 +7,13 @@
    faithful BSD repackage of `HawkMRS/pyAMARES <https://github.com/hawkMRS/pyAMARES>`_ whose
    only substantive difference is that ``hlsvdpro`` is declared with a PEP 508 environment
    marker, so that ``pip install`` succeeds on Apple Silicon (arm64). **There are no source
-   or algorithm changes, and the import name is still** ``import pyAMARES``. See
-   `REPACKAGE_NOTE.md <https://github.com/andrewendlinger/pyAMARES/blob/pyamares-xmris/REPACKAGE_NOTE.md>`_
-   for the full rationale, and please cite the original authors.
+   or algorithm changes, and the import name is still** ``import pyAMARES``.
+
+   Every difference from upstream, every known dependency limitation, and the open
+   questions not yet decided are recorded in
+   `DIVERGENCE.md <https://github.com/andrewendlinger/pyAMARES/blob/pyamares-xmris/DIVERGENCE.md>`_.
+   Note in particular that this package **cannot be installed alongside upstream**
+   ``pyAMARES`` — both occupy ``site-packages/pyAMARES/``. Please cite the original authors.
 
 .. image:: https://raw.githubusercontent.com/HawkMRS/pyAMARES/main/pyAMARES_logo.svg
    :width: 400
