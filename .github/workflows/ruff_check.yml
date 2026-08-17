@@ -24,9 +24,13 @@ jobs:
           python-version: ${{ inputs.python-version }}
 
       - name: Install dependencies (including Ruff)
+        # Ruff is pinned to a minor series on purpose. An unpinned `pip install
+        # ruff` once drifted ahead of every contributor's local version and
+        # surfaced a rule (F507) that only CI could see. Bumping this pin is a
+        # deliberate, reviewable change — reformat the tree in the same commit.
         run: |
           python -m pip install --upgrade pip
-          python -m pip install ruff
+          python -m pip install 'ruff==0.16.*'
 
       - name: Run Ruff linter check
         run: ruff check .
