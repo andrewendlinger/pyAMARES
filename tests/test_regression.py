@@ -412,3 +412,35 @@ def test_hsvd_backend_selection():
         f"{hlsvdpro_importable} should select {expected!r}, but util/hsvd.py bound "
         f"{hsvd_module.hlsvd.__name__!r}"
     )
+
+
+# --------------------------------------------------------------------------------
+# Prior-knowledge dtype handling
+# --------------------------------------------------------------------------------
+
+
+def test_non_float32_representable_phase_survives_unit_conversion():
+    """A 180-degree prior phase must load on every pandas.
+
+    ``safe_convert_to_numeric`` downcasts numeric prior-knowledge cells to
+    ``float32``, and ``unitconverter`` writes ``np.deg2rad(180) ==
+    3.141592653589793`` back into that column -- a float64 value with no float32
+    representation. pandas <= 2.3 upcast the column silently (FutureWarning);
+    pandas 3 raises ``TypeError: Invalid value '3.141592653589793' for dtype
+    'float32'``.
+
+    Neither golden prior reaches this path -- both declare every phase as 0 or as
+    an expression -- so it is pinned here on ``tests/Table1.csv``, which declares
+    two peaks at 180 degrees. The assert is on the exact float64 value: a silent
+    float32 round trip would yield 3.1415927410125732.
+    """
+    import pyAMARES
+
+    rc.quiet()
+    obj = pyAMARES.initialize_FID(
+        fid=None,
+        priorknowledgefile=os.path.join(rc.TESTS_DIR, "Table1.csv"),
+        preview=False,
+    )
+    assert obj.initialParams["phi_Tau"].value == math.radians(180.0)
+    assert obj.initialParams["phi_Tau2"].value == math.radians(180.0)

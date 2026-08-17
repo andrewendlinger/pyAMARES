@@ -171,6 +171,49 @@ def extract_expr(pk, MHz=120.0):
     return process_df_corrected(df)
 
 
+def _widen_columns_that_cannot_hold(df, values):
+    """
+    Widen to float64 exactly those columns whose dtype cannot hold ``values``.
+
+    ``safe_convert_to_numeric`` calls ``pd.to_numeric(..., downcast="float")``, so
+    numeric prior-knowledge cells arrive as **float32**. Writing a float64 result
+    back into such a column is a lossy setitem whenever the value has no float32
+    representation -- ``np.deg2rad(180) == 3.141592653589793`` is the case that
+    bites, and a 180 degree prior phase is ordinary. pandas up to 2.3 widened the
+    column itself and only warned::
+
+        FutureWarning: Setting an item of incompatible dtype is deprecated ...
+
+    pandas 3 refuses::
+
+        TypeError: Invalid value '3.141592653589793' for dtype 'float32'
+
+    Doing the widening here, and only for the columns pandas would have widened,
+    reproduces the pandas <= 2.3 outcome exactly on every supported pandas: the
+    untouched columns keep their float32 dtype and their float32 arithmetic.
+
+    Args:
+        df (pandas.DataFrame): The DataFrame about to be written to.
+        values (pandas.Series): The values to be written, indexed by column label.
+
+    Returns:
+        pandas.DataFrame: ``df`` itself if nothing needs widening, otherwise a
+        copy with the offending columns cast to ``float64``.
+    """
+    widen = {}
+    for col, value in values.items():
+        dtype = df[col].dtype
+        if dtype.kind != "f" or dtype.itemsize >= 8:
+            continue  # object, integer, or already float64 -- nothing to lose
+        # float() on both sides is load-bearing: comparing the narrowed numpy
+        # scalar against the original directly is a lie under numpy 2, whose
+        # NEP 50 rules demote the weak Python float to float32 and report the
+        # round trip as lossless.
+        if np.isfinite(value) and float(dtype.type(value)) != float(value):
+            widen[col] = np.float64
+    return df.astype(widen) if widen else df
+
+
 def unitconverter(df_ini, MHz=120.0):
     """
     Convert units of parameters in a DataFrame based on their physical context.
@@ -193,9 +236,10 @@ def unitconverter(df_ini, MHz=120.0):
         df.loc["linewidth", df.notna().loc["linewidth"]] *= np.pi
 
     if "phase" in df.index:
-        df.loc["phase", df.notna().loc["phase"]] = np.deg2rad(
-            df.loc["phase"][df.notna().loc["phase"]].astype(float)
-        )
+        phase_mask = df.notna().loc["phase"]
+        phase_rad = np.deg2rad(df.loc["phase"][phase_mask].astype(float))
+        df = _widen_columns_that_cannot_hold(df, phase_rad)
+        df.loc["phase", phase_mask] = phase_rad
 
     return df
 
