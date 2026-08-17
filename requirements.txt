@@ -1,12 +1,8 @@
-matplotlib
-nmrglue
-numpy
-pandas
-scipy
-setuptools
-sympy
-lmfit
-mat73
-tqdm
-notebook
-# hlsvdpro==2.0.0 #arm64 does not have it
+# Intentionally empty.
+#
+# The dependency metadata for pyamares-xmris lives in setup.py's `install_requires`
+# (and its `extras_require`). This file is kept only so that merges from upstream
+# stay quiet; a second, unversioned copy of the dependency list here would drift out
+# of sync with — and contradict — the metadata that is actually installed.
+#
+# Install with `pip install pyamares-xmris`, or `pip install -e .` from a checkout.

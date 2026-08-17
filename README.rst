@@ -4,10 +4,12 @@
 .. note::
 
    **This is** ``pyamares-xmris``, **a repackage — not the original project.** It is a
-   faithful BSD repackage of `HawkMRS/pyAMARES <https://github.com/hawkMRS/pyAMARES>`_ whose
-   only substantive difference is that ``hlsvdpro`` is declared with a PEP 508 environment
-   marker, so that ``pip install`` succeeds on Apple Silicon (arm64). **There are no source
-   or algorithm changes, and the import name is still** ``import pyAMARES``.
+   faithful BSD repackage of `HawkMRS/pyAMARES <https://github.com/hawkMRS/pyAMARES>`_ that
+   declares ``hlsvdpro`` with a PEP 508 environment marker, so that ``pip install`` succeeds
+   on Apple Silicon (arm64), and carries **only minimal, individually documented
+   compatibility fixes** — from 0.4.0, the ones that make the source correct under numpy 2,
+   pandas 3 and Python 3.14. The fitting algorithms are untouched, and **the import name is
+   still** ``import pyAMARES``.
 
    Every difference from upstream, every known dependency limitation, and the open
    questions not yet decided are recorded in

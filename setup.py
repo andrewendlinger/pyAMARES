@@ -78,13 +78,15 @@ ruff_requirements = [
 
 
 install_requires = [
-    "pandas>=1.1.0,<2.2.0",
+    "pandas>=1.1.0",
     "matplotlib>=3.1.3",
     "lmfit",
-    "numpy>=1.18.1,<2.0.0",
+    "numpy>=1.18.1",
     "scipy>=1.2.1",
     "sympy",
-    "nmrglue",
+    # 0.12 replaced np.dtype('a8') with np.dtype('S8'); anything older fails to
+    # import under numpy 2, and pyAMARES imports nmrglue eagerly. See D16.
+    "nmrglue>=0.12",
     "xlrd",
     "jinja2",
     "tqdm",
@@ -108,9 +110,10 @@ setup(
     author=__author__,
     author_email="jia-xu-1@uiowa.edu",
     description=(
-        "PyAMARES repackaged for clean pip installs on Apple Silicon (arm64): "
-        "hlsvdpro is made platform-conditional. A faithful BSD repackage of "
-        "HawkMRS/pyAMARES with zero algorithm changes; still 'import pyAMARES'."
+        "PyAMARES repackaged for clean pip installs on Apple Silicon (arm64) and "
+        "for numpy 2 / pandas 3: a faithful BSD repackage of HawkMRS/pyAMARES "
+        "carrying only minimal, ledger-documented compatibility fixes "
+        "(see DIVERGENCE.md); still 'import pyAMARES'."
     ),
     long_description=open("README.rst", encoding="utf-8").read(),
     long_description_content_type="text/x-rst",
@@ -132,14 +135,17 @@ setup(
         "Programming Language :: Python :: 3.9",
         "Programming Language :: Python :: 3.10",
         "Programming Language :: Python :: 3.11",
-        # 3.13/3.14 are intentionally not listed: the numpy<2.0 / pandas<2.2 caps
-        # below resolve to numpy 1.26.4 and pandas 2.1.4, whose wheels stop at cp312.
         "Programming Language :: Python :: 3.12",
+        "Programming Language :: Python :: 3.13",
+        "Programming Language :: Python :: 3.14",
         "Topic :: Scientific/Engineering",
         "License :: OSI Approved :: BSD License",
         "Operating System :: OS Independent",
     ],
-    python_requires=">=3.8",  # Minimum Python version requirement
+    # Kept at upstream's floor: with the caps lifted, 3.8 still resolves (numpy
+    # 1.24.4 / pandas 2.0.3 / nmrglue 0.12) and the regression corpus passes there.
+    # No upper bound — 3.13 and 3.14 are verified. See D16.
+    python_requires=">=3.8",
     install_requires=install_requires,
     extras_require={
         "docs": doc_requirements,
