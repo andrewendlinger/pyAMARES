@@ -15,7 +15,7 @@ v0.4.0 (unreleased)
    `pyAMARES issue #1`_ and `xmris issue #158`_.
 
 **Changed**
-  - Lifted the ``numpy<2.0.0`` and ``pandas<2.2.0`` ceilings; only the ceilings were removed, every floor is untouched. A fresh install now resolves to numpy 2 and pandas 3. (D16)
+  - Lifted the ``numpy<2.0.0`` and ``pandas<2.2.0`` ceilings; only the ceilings were removed, every floor is untouched. A fresh install on current Pythons (3.12+) now resolves to numpy 2 and pandas 3; older interpreters get the newest stack their wheels allow (e.g. numpy 1.24 / pandas 2.0 on 3.8). (D16)
   - Floored ``nmrglue`` at ``>=0.12``. 0.11 used ``np.dtype('a8')``, removed in numpy 2, and ``import pyAMARES`` pulls nmrglue eagerly — so this, not pyAMARES itself, was the numpy 2 blocker. nmrglue 0.12 imports fine on numpy 1.26.4, so the floor costs nothing on the old stack. (D16, C1)
   - Python 3.13 and 3.14 are supported and advertised again: both trove classifiers are restored, and the regression corpus passes on both. (D16, reversing D5)
   - ``python_requires`` stays ``>=3.8``, now on evidence rather than inheritance — with the ceilings gone, 3.8 resolves to numpy 1.24.4 / pandas 2.0.3 / nmrglue 0.12 and all 53 corpus tests pass there. The ``<3.13`` cap once proposed is no longer needed. (D16, closing C4)

@@ -350,7 +350,12 @@ Not commitments. Recorded so the cost is known when the question comes up.
                2026-08-16 carrying exactly the fix this entry was waiting on
                (np.dtype('a8') -> np.dtype('S8')), so no source change and no
                inlined FFT was needed — D16 floors the dependency at 0.12 and
-               drops the numpy ceiling. nmrglue is still used for one function.
+               drops the numpy ceiling. nmrglue remains in use — and note the
+               historical Notes below undercount it: besides ng.proc_base.fft
+               (12 call sites across kernel/objective_func.py, kernel/fid.py,
+               util/hsvd.py, util/visualization.py, libs/MPFIR.py), pyAMARES
+               also calls ng.proc_base.em (kernel/fid.py, 2 sites), so a future
+               "drop nmrglue" (option b) must inline both wrappers, not one.
                The Python ceiling this entry describes is gone with it: 3.13 and
                3.14 are supported, classified and corpus-verified, and the
                package no longer pins anyone to numpy 1.x.
