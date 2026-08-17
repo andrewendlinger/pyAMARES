@@ -1,0 +1,396 @@
+# The one supported invocation of this suite — copy it verbatim:
+#
+#     pytest tests/test_regression.py tests/test_api_surface.py -o addopts=""
+#
+# `-o addopts=""` is not optional: pytest.ini injects --nbval-lax, which errors out
+# in a minimal environment that has no nbval installed.
+"""Numeric regression tests: the frozen goldens, plus stack-independent invariants.
+
+What is frozen and what is not
+------------------------------
+The fitted parameters and every CRLB column are golden-compared cell by cell against
+``tests/goldens/*.json``. The four ``sd`` columns never are — they come out of an
+ill-conditioned Fisher matrix through ``pinv``/``lstsq`` and are not reproducible
+across dependency stacks. They are guarded *structurally* instead, below.
+
+Tolerances live inside each golden JSON, so loosening one later (say, for cross-BLAS
+drift on a CRLB column) is a data-only edit with a comment — never a code change.
+They are not bit-for-bit and cannot be: numpy's SIMD complex multiply inside
+``equation6`` is memory-alignment sensitive, which makes the fit reproducible only to
+about 1e-5 relative even on one machine, one process, back to back. See the comment
+on ``DEFAULT_TOLERANCES`` in ``tests/capture_goldens.py`` for the full diagnosis.
+"""
+
+from __future__ import annotations
+
+import glob
+import json
+import math
+import os
+
+import numpy as np
+import pytest
+
+try:  # imported as part of the ``tests`` package
+    from tests import regression_cases as rc
+except ImportError:  # pragma: no cover - direct invocation from inside tests/
+    import regression_cases as rc  # type: ignore[no-redef]
+
+
+# --------------------------------------------------------------------------------
+# Golden comparison
+# --------------------------------------------------------------------------------
+
+
+def load_golden(name: str) -> dict:
+    path = os.path.join(rc.GOLDENS_DIR, f"{name}.json")
+    if not os.path.exists(path):
+        raise AssertionError(
+            f"Missing golden {path}. Capture it with:\n"
+            f"    python tests/capture_goldens.py --write tests/goldens/"
+        )
+    with open(path, encoding="utf-8") as handle:
+        return json.load(handle)
+
+
+def cells_equal(actual: float, expected: float, rtol: float, atol: float) -> bool:
+    """NaN == NaN, otherwise ``np.isclose``."""
+    if math.isnan(actual) and math.isnan(expected):
+        return True
+    return bool(np.isclose(actual, expected, rtol=rtol, atol=atol, equal_nan=False))
+
+
+@pytest.mark.parametrize("case_name", sorted(rc.GOLDEN_CASES))
+def test_golden_result_multiplets(case_name):
+    """Every golden cell of ``result_multiplets`` still matches the frozen value.
+
+    Mismatches are collected and reported together — a dependency bump that moves
+    ten metabolites should show all ten, not just the alphabetically first.
+    """
+    golden = load_golden(case_name)
+    df = rc.golden_case_result(case_name).result_multiplets
+
+    assert [str(x) for x in df.index] == golden["index"], (
+        f"{case_name}: the metabolite row index changed.\n"
+        f"  expected: {golden['index']}\n"
+        f"  actual:   {[str(x) for x in df.index]}"
+    )
+    assert [str(c) for c in df.columns] == golden["columns_exact_order"], (
+        f"{case_name}: result_multiplets columns changed (label text or order).\n"
+        f"  expected: {golden['columns_exact_order']}\n"
+        f"  actual:   {[str(c) for c in df.columns]}"
+    )
+
+    tol = golden["tolerances"]
+    per_column = tol.get("per_column", {})
+    mismatches = []
+    for column, expected_col in golden["values"].items():
+        rtol = per_column.get(column, {}).get("rtol", tol["default_rtol"])
+        atol = per_column.get(column, {}).get("atol", tol["default_atol"])
+        for metabolite, expected in expected_col.items():
+            actual = float(df.at[metabolite, column])
+            if not cells_equal(actual, expected, rtol, atol):
+                rel = (
+                    abs(actual - expected) / abs(expected)
+                    if expected not in (0.0,) and not math.isnan(expected)
+                    else float("nan")
+                )
+                mismatches.append(
+                    f"  {column!r:20s} {metabolite:8s} "
+                    f"expected {expected!r} got {actual!r} (rel {rel:.3e})"
+                )
+
+    assert not mismatches, (
+        f"{case_name}: {len(mismatches)} golden cell(s) drifted "
+        f"(golden captured on {golden['meta']['python']}/"
+        f"numpy {golden['meta']['numpy']}/pandas {golden['meta']['pandas']}, "
+        f"running on {np.__version__}):\n" + "\n".join(mismatches)
+    )
+
+
+def test_every_golden_file_has_a_case():
+    """No orphan goldens: a file under tests/goldens/ must map to a live case."""
+    on_disk = {
+        os.path.splitext(os.path.basename(p))[0]
+        for p in glob.glob(os.path.join(rc.GOLDENS_DIR, "*.json"))
+    }
+    assert on_disk == set(rc.GOLDEN_CASES), (
+        "tests/goldens/ and regression_cases.GOLDEN_CASES disagree.\n"
+        f"  only on disk: {sorted(on_disk - set(rc.GOLDEN_CASES))}\n"
+        f"  only in code: {sorted(set(rc.GOLDEN_CASES) - on_disk)}"
+    )
+
+
+@pytest.mark.parametrize("case_name", sorted(rc.GOLDEN_CASES))
+def test_goldens_never_freeze_the_sd_columns(case_name):
+    """A re-capture must not quietly start freezing the non-reproducible sd columns."""
+    golden = load_golden(case_name)
+    frozen = set(golden["values"])
+    leaked = frozen & set(rc.STRUCTURAL_COLUMNS)
+    assert not leaked, (
+        f"{case_name}: sd column(s) {sorted(leaked)} were golden-compared. They are "
+        "not reproducible across dependency stacks — guard them structurally instead."
+    )
+    assert frozen == set(golden["golden_columns"])
+
+
+# --------------------------------------------------------------------------------
+# Case B — synthetic 3-peak fit: accuracy against the known ground truth
+# --------------------------------------------------------------------------------
+
+VARIANT_IDS = list(rc.SYNTHETIC_VARIANTS)
+
+
+@pytest.fixture(scope="module")
+def synthetic_fits():
+    """Every synthetic variant, fitted once for the whole module."""
+    return {name: rc.run_synthetic_variant(name) for name in rc.SYNTHETIC_VARIANTS}
+
+
+@pytest.mark.parametrize("variant", VARIANT_IDS)
+def test_synthetic_recovers_ground_truth(synthetic_fits, variant):
+    """The fit recovers the parameters the synthetic FID was built from.
+
+    Stack-independent by construction: this checks physics, not float bits, so it
+    keeps meaning after a dependency bump that legitimately perturbs the last digits.
+
+    The linewidth check applies only to the ``g_global=0.0`` variants. With ``g``
+    free the model carries a Gaussian/Lorentzian mixing parameter the noiseless
+    truth does not use, and ``g`` trades off against the damping factor: the fit
+    stays excellent in amplitude and chemical shift but parks some of the decay in
+    ``g``, so the reported ``LW(Hz)`` legitimately drifts (measured up to +77% on
+    the broadest peak at the low-SNR scale). Asserting a bound wide enough to pass
+    there would assert nothing.
+    """
+    noise_key, g_global = rc.SYNTHETIC_VARIANTS[variant]
+    check_linewidth = g_global is not False
+    fitted, truth = synthetic_fits[variant]
+    result = fitted.result_multiplets
+    assert list(result.index) == list(truth.index)
+
+    problems = []
+    for name in truth.index:
+        amp_rel = abs(result.at[name, "amplitude"] - truth.at[name, "amplitude"]) / abs(
+            truth.at[name, "amplitude"]
+        )
+        if amp_rel > 0.05:
+            problems.append(f"  {name}: amplitude off by {amp_rel:.2%} (> 5%)")
+
+        shift_abs = abs(
+            result.at[name, "chem shift(ppm)"] - truth.at[name, "chem shift(ppm)"]
+        )
+        if shift_abs > 0.05:
+            problems.append(f"  {name}: chem shift off by {shift_abs:.4f} ppm (> 0.05)")
+
+        if check_linewidth:
+            lw_rel = abs(result.at[name, "LW(Hz)"] - truth.at[name, "LW(Hz)"]) / abs(
+                truth.at[name, "LW(Hz)"]
+            )
+            if lw_rel > 0.10:
+                problems.append(f"  {name}: LW off by {lw_rel:.2%} (> 10%)")
+
+    assert not problems, (
+        f"synthetic fit (noise scale {rc.SYNTHETIC_NOISE_SCALES[noise_key]}, "
+        f"g_global={g_global!r}) missed the ground truth:\n" + "\n".join(problems)
+    )
+
+
+# --------------------------------------------------------------------------------
+# Case B — the sd columns, structurally only
+# --------------------------------------------------------------------------------
+
+#: ``(value column, sd column, CRLB column, lmfit parameter prefix)`` — the four
+#: parameter families ``report_amares`` reports a standard deviation and a CRLB for.
+SD_CRLB_FAMILIES = [
+    ("amplitude", "sd", "CRLB(%)", "ak"),
+    ("chem shift(ppm)", "sd(ppm)", "CRLB(cs%) ", "freq"),
+    ("LW(Hz)", "sd(Hz)", "CRLB(LW%)", "dk"),
+    ("phase(deg)", "sd(deg)", "CRLB(phase%)", "phi"),
+]
+
+#: Agreement with the fit-wide sd/CRLB scale factor demanded of a freely varying
+#: parameter. Measured worst deviation over 30 repeat runs: 1.5e-6.
+FREE_K_RTOL = 1e-4
+#: ...and of a parameter pinned by an ``expr`` tie, whose standard error is
+#: propagated while its CRLB is not. Measured worst deviation: 5.8e-3.
+TIED_K_RTOL = 2e-2
+
+
+@pytest.mark.parametrize("variant", VARIANT_IDS)
+def test_synthetic_sd_columns_are_well_formed(synthetic_fits, variant):
+    """All four sd columns are finite, strictly positive, and smaller than the signal."""
+    result = synthetic_fits[variant][0].result_multiplets
+    problems = []
+    for column in rc.STRUCTURAL_COLUMNS:
+        values = result[column]
+        for name, value in values.items():
+            if not np.isfinite(value):
+                problems.append(f"  {column!r} {name}: not finite ({value!r})")
+            elif value <= 0:
+                problems.append(f"  {column!r} {name}: not positive ({value!r})")
+    for name in result.index:
+        if not result.at[name, "sd"] < result.at[name, "amplitude"]:
+            problems.append(
+                f"  sd {name}: {result.at[name, 'sd']!r} is not smaller than the "
+                f"amplitude {result.at[name, 'amplitude']!r}"
+            )
+    assert not problems, "malformed sd columns:\n" + "\n".join(problems)
+
+
+@pytest.mark.parametrize("variant", VARIANT_IDS)
+def test_sd_and_crlb_are_proportional(synthetic_fits, variant):
+    """``sd = k * (CRLB/100) * |value|`` with one constant ``k`` per fit.
+
+    Measured, not assumed. The obvious guess — ``CRLB(%) == 100*sd/|value|``, i.e.
+    ``k == 1`` — is **false**: ``report_amares`` fills ``sd`` from lmfit's own
+    standard errors (scaled by the reduced chi-square) and ``CRLB(%)`` from
+    ``evaluateCRB``'s Fisher-matrix bound (scaled by the OXSA noise-variance
+    estimate). Both are the same square root of the same inverse Fisher diagonal
+    under different noise normalisations, so they are exactly proportional with a
+    single per-fit constant. On the baseline stack that constant is ~0.9976 for the
+    synthetic cases and ~0.72875 for the documented example fit — nowhere near 1.
+
+    ``k`` is read off the amplitude family, where it is reproducible to 4e-7 over 30
+    repeat runs. Two tolerances follow, both measured over those runs:
+
+    * a parameter the prior knowledge lets vary freely agrees with the fit-wide
+      ``k`` to 1.5e-6, so it is held to ``FREE_K_RTOL`` (1e-4, a 60x margin);
+    * a parameter pinned by an ``expr`` tie — ``Beta``'s chemical shift and phase
+      here — does not. lmfit *propagates* the tied parameter's standard error from
+      the peak it is tied to, while ``evaluateCRB`` computes that peak's CRLB
+      independently, and the two disagree by up to 5.8e-3 in a way that is itself
+      not reproducible run to run. Tied cells are held to ``TIED_K_RTOL`` (2e-2).
+    """
+    fitted = synthetic_fits[variant][0]
+    result = fitted.result_multiplets
+    tied = {
+        tuple(name.split("_", 1))
+        for name, param in fitted.fittedParams.items()
+        if param.expr
+    }
+
+    def implied_k(value_col, sd_col, crlb_col):
+        return result[sd_col] / (result[crlb_col] / 100.0 * result[value_col].abs())
+
+    amplitude_k = implied_k(*SD_CRLB_FAMILIES[0][:3])
+    assert np.allclose(amplitude_k, amplitude_k.iloc[0], rtol=1e-5), (
+        f"k is not constant within the amplitude family: {amplitude_k.to_dict()}"
+    )
+    k = float(amplitude_k.median())
+    assert 0.0 < k < 10.0, f"implausible sd/CRLB scale factor k={k!r}"
+
+    problems = []
+    for value_col, sd_col, crlb_col, prefix in SD_CRLB_FAMILIES:
+        for name, value in implied_k(value_col, sd_col, crlb_col).items():
+            is_tied = (prefix, name) in tied
+            rtol = TIED_K_RTOL if is_tied else FREE_K_RTOL
+            if not np.isclose(value, k, rtol=rtol):
+                problems.append(
+                    f"  {sd_col!r} {name} ({'expr-tied' if is_tied else 'free'}): "
+                    f"k={value!r} deviates from the fit-wide k={k!r} by "
+                    f"{abs(value - k) / k:.2e} (> {rtol:.0e})"
+                )
+    assert not problems, (
+        f"sd and CRLB are no longer proportional (fit-wide k={k!r}):\n"
+        + "\n".join(problems)
+    )
+
+
+@pytest.mark.parametrize("suffix", ["g0", "gfree"])
+def test_sd_grows_with_noise(synthetic_fits, suffix):
+    """More noise, larger standard deviations — for every metabolite, every column."""
+    low = synthetic_fits[f"noise1_{suffix}"][0].result_multiplets
+    high = synthetic_fits[f"noise2_{suffix}"][0].result_multiplets
+    problems = []
+    for column in rc.STRUCTURAL_COLUMNS:
+        for name in low.index:
+            if not high.at[name, column] > low.at[name, column]:
+                problems.append(
+                    f"  {column!r} {name}: noise2 sd {high.at[name, column]!r} is not "
+                    f"greater than noise1 sd {low.at[name, column]!r}"
+                )
+    assert not problems, (
+        "the sd columns did not grow with the noise scale "
+        f"({rc.SYNTHETIC_NOISE_SCALES[1]} -> {rc.SYNTHETIC_NOISE_SCALES[2]}):\n"
+        + "\n".join(problems)
+    )
+
+
+# --------------------------------------------------------------------------------
+# Case C — the HSVD path: structural only, no goldens
+# --------------------------------------------------------------------------------
+
+
+@pytest.fixture(scope="module")
+def hsvd_result():
+    return rc.run_hsvd_case()
+
+
+def test_hsvd_components_are_plausible(hsvd_result):
+    """The HSVD decomposition of the example FID stays physically sane.
+
+    No numbers are frozen here: the two backends (``hlsvdpro`` and the vendored
+    pure-Python ``pyAMARES.libs.hlsvd``) differ numerically by design.
+    """
+    table = hsvd_result["table"]
+    fidobj = hsvd_result["fidobj"]
+    assert 0 < len(table) <= rc.HSVD_NUM_COMPONENTS
+
+    raw = table[["ak", "freq", "dk", "phi", "g"]].to_numpy(dtype=float)
+    assert np.isfinite(raw).all(), f"non-finite HSVD parameters:\n{table}"
+
+    assert (table["amplitude"] > 0).all(), f"non-positive amplitudes:\n{table}"
+    assert (table["linewidth_hz"] > 0).all(), f"non-positive linewidths:\n{table}"
+    # HSVDinitializer filters on dk < lw_threshold (500 rad/s) before returning.
+    assert (table["linewidth_hz"] < 500.0 / np.pi).all(), (
+        f"a component survived the linewidth filter it should not have:\n{table}"
+    )
+
+    nyquist_ppm = rc.EXAMPLE_SW / 2.0 / rc.EXAMPLE_MHZ
+    assert table["ppm"].abs().max() < nyquist_ppm, (
+        f"a component sits outside the +-{nyquist_ppm:.2f} ppm spectral window:\n"
+        f"{table}"
+    )
+
+    # HSVDinitializer records how much of the data the components explain.
+    assert 0.0 < fidobj.relativeNorm < 1.0, (
+        f"HSVD residual norm ratio {fidobj.relativeNorm!r} is not in (0, 1)"
+    )
+
+
+def test_hsvd_dominant_component_is_pcr(hsvd_result):
+    """The strongest component of the 31P example FID is PCr, at 0 ppm."""
+    table = hsvd_result["table"]
+    dominant = table["amplitude"].idxmax()
+    ppm = float(table.at[dominant, "ppm"])
+    assert abs(ppm) <= 0.5, (
+        f"the dominant HSVD component sits at {ppm:.3f} ppm, more than 0.5 ppm from "
+        f"PCr at 0 ppm:\n{table}"
+    )
+
+
+def test_hsvd_backend_selection():
+    """The ``hlsvd`` symbol resolves per ``pyAMARES/util/hsvd.py``'s own rule.
+
+    ``util/hsvd.py`` binds ``hlsvd`` to the vendored ``pyAMARES.libs.hlsvd`` when
+    numpy is 2.x or when ``hlsvdpro`` is not installed, and to ``hlsvdpro``
+    otherwise. Both bindings are *modules*, so the identity check is on
+    ``__name__``; a module has no ``__module__`` attribute.
+    """
+    import pyAMARES.util.hsvd as hsvd_module
+
+    numpy_major = int(np.__version__.split(".")[0])
+    try:
+        import hlsvdpro  # noqa: F401
+
+        hlsvdpro_importable = True
+    except ImportError:
+        hlsvdpro_importable = False
+
+    expect_vendored = numpy_major >= 2 or not hlsvdpro_importable
+    expected = "pyAMARES.libs.hlsvd" if expect_vendored else "hlsvdpro"
+    assert hsvd_module.hlsvd.__name__ == expected, (
+        f"numpy {np.__version__} (major {numpy_major}), hlsvdpro importable="
+        f"{hlsvdpro_importable} should select {expected!r}, but util/hsvd.py bound "
+        f"{hsvd_module.hlsvd.__name__!r}"
+    )

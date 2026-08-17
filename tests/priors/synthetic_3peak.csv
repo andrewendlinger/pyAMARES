@@ -1,0 +1,16 @@
+# Synthetic 3-peak prior knowledge. Hand-written for the regression corpus: every,,,
+# pandas-sensitive branch of PriorKnowledge.py is exercised at least once. See,,,
+# tests/regression_cases.py (SYNTHETIC_GROUND_TRUTH) for the values it must recover.,,,
+Index,Alpha,Beta,Gamma
+Initial Values,,,
+amplitude,1.2,0.5,0.4
+chemicalshift,0.2,Alpha+600Hz,-7.8
+linewidth,25,25,20
+phase,0,Alpha,0
+g,0.01,0.01,
+Bounds,,,
+amplitude,"(0, ","(0, ","(0, "
+chemicalshift,"(-1.0, 1.0)",,"(-9.0, -7.0)"
+linewidth,"(0,",",200)","(5, 40)"
+phase,"(-180, 180)","(-180, 180)","(-180, 180)"
+g,"(0,1)","(0,1)",0
