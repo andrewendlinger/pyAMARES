@@ -271,16 +271,31 @@ def run_hsvd_case():
     return {"fidobj": fidobj, "params": params, "table": table}
 
 
+_SYNTHETIC_CACHE: dict = {}
+
+
+def synthetic_variant_result(variant: str):
+    """Memoized :func:`run_synthetic_variant` — one fit per variant per process.
+
+    The golden path and the physics/sd tests read the same nominal fit; sharing
+    one fitted object keeps them literally the same fit, not two runs of the same
+    spec that could silently diverge. Callers treat the result as read-only.
+    """
+    if variant not in _SYNTHETIC_CACHE:
+        _SYNTHETIC_CACHE[variant] = run_synthetic_variant(variant)
+    return _SYNTHETIC_CACHE[variant]
+
+
 #: The golden cases, by name. Each entry returns the FID object whose
 #: ``result_multiplets`` gets frozen. ``capture_goldens.py`` and
 #: ``test_regression.py`` both iterate this mapping, so adding a golden case is a
-#: one-line change here.
+#: one-line change here. The synthetic entry reuses the named
+#: :data:`SYNTHETIC_VARIANTS` spec through the memoized runner, so the golden and
+#: the physics tests cannot drift apart.
 GOLDEN_CASES = {
     "example_readme": run_example_case,
     "example_xmris_shape": run_example_xmris_shape_case,
-    "synthetic_noise1_gfree": lambda: run_synthetic_case(
-        SYNTHETIC_NOISE_SCALES[1], g_global=False
-    )[0],
+    "synthetic_noise1_gfree": lambda: synthetic_variant_result("noise1_gfree")[0],
 }
 
 _CASE_CACHE: dict = {}
@@ -296,6 +311,32 @@ def golden_case_result(name: str):
         _CASE_CACHE[name] = GOLDEN_CASES[name]()
     return _CASE_CACHE[name]
 
+
+#: The exact column order of ``result_multiplets``, captured from the baseline run.
+#: Sixteen labels, not the thirteen xmris reads: ``g``/``g_sd``/``g (%)`` ride
+#: along. ``"CRLB(cs%) "`` carries a **trailing space** — emitted that way by
+#: ``report_amares``, and xmris matches on the literal string, so the space is
+#: load-bearing API, not a typo to tidy up. This is the single source of truth;
+#: the goldens' ``columns_exact_order`` and ``test_api_surface`` both check
+#: against it.
+RESULT_MULTIPLETS_COLUMNS = [
+    "amplitude",
+    "sd",
+    "CRLB(%)",
+    "chem shift(ppm)",
+    "sd(ppm)",
+    "CRLB(cs%) ",
+    "LW(Hz)",
+    "sd(Hz)",
+    "CRLB(LW%)",
+    "phase(deg)",
+    "sd(deg)",
+    "CRLB(phase%)",
+    "g",
+    "g_sd",
+    "g (%)",
+    "SNR",
+]
 
 #: Columns frozen bit-for-bit. ``sd``/``sd(ppm)``/``sd(Hz)``/``sd(deg)`` are
 #: deliberately absent — see :data:`STRUCTURAL_COLUMNS`.

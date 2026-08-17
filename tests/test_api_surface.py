@@ -24,30 +24,10 @@ except ImportError:  # pragma: no cover - direct invocation from inside tests/
     import regression_cases as rc  # type: ignore[no-redef]
 
 
-#: The exact column order of ``result_multiplets``, captured from the baseline run.
-#: Sixteen labels, not thirteen: xmris reads the thirteen in
-#: :data:`XMRIS_CONSUMED_COLUMNS`, and ``g``/``g_sd``/``g (%)`` ride along.
-#: ``"CRLB(cs%) "`` carries a **trailing space** — it is emitted that way by
-#: ``report_amares`` and xmris matches on the literal string, so the space is
-#: load-bearing API, not a typo to tidy up.
-RESULT_MULTIPLETS_COLUMNS = [
-    "amplitude",
-    "sd",
-    "CRLB(%)",
-    "chem shift(ppm)",
-    "sd(ppm)",
-    "CRLB(cs%) ",
-    "LW(Hz)",
-    "sd(Hz)",
-    "CRLB(LW%)",
-    "phase(deg)",
-    "sd(deg)",
-    "CRLB(phase%)",
-    "g",
-    "g_sd",
-    "g (%)",
-    "SNR",
-]
+#: Single source of truth in ``regression_cases`` (the goldens' ``columns_exact_order``
+#: is checked against the same constant): sixteen labels, of which xmris reads the
+#: thirteen in :data:`XMRIS_CONSUMED_COLUMNS`.
+RESULT_MULTIPLETS_COLUMNS = rc.RESULT_MULTIPLETS_COLUMNS
 
 #: The thirteen labels xmris itself reads out of ``result_multiplets``.
 XMRIS_CONSUMED_COLUMNS = [
@@ -131,6 +111,12 @@ def test_result_multiplets_index_is_metabolite_names(fitted_example):
     )
     assert all(name.strip() for name in index), f"empty metabolite name in {index!r}"
     assert len(set(index)) == len(index), f"duplicate metabolite names in {index!r}"
+    # Today this equality is a *coincidence*, not a library guarantee: the
+    # mechanism meant to enforce it is a no-op — pyAMARES/util/report.py calls
+    # ``result.reindex(fid_parameters.peaklist)`` and discards the return value —
+    # so row order is really lmfit parameter insertion order, which happens to
+    # match the prior-file peak order. If this assert ever fails, the root cause
+    # is that discarded reindex, not this test.
     assert index == fitted_example.peaklist
 
 

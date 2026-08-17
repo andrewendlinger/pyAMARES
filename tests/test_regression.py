@@ -53,13 +53,6 @@ def load_golden(name: str) -> dict:
         return json.load(handle)
 
 
-def cells_equal(actual: float, expected: float, rtol: float, atol: float) -> bool:
-    """NaN == NaN, otherwise ``np.isclose``."""
-    if math.isnan(actual) and math.isnan(expected):
-        return True
-    return bool(np.isclose(actual, expected, rtol=rtol, atol=atol, equal_nan=False))
-
-
 @pytest.mark.parametrize("case_name", sorted(rc.GOLDEN_CASES))
 def test_golden_result_multiplets(case_name):
     """Every golden cell of ``result_multiplets`` still matches the frozen value.
@@ -69,6 +62,20 @@ def test_golden_result_multiplets(case_name):
     """
     golden = load_golden(case_name)
     df = rc.golden_case_result(case_name).result_multiplets
+
+    # Guard the golden against the *live* constants, not against its own copies of
+    # them (both sides of a JSON-vs-JSON comparison were written by the same
+    # capture run, so it can never fail). If someone edits GOLDEN_COLUMNS or
+    # RESULT_MULTIPLETS_COLUMNS without re-capturing, these two lines catch it.
+    assert set(golden["values"]) == set(rc.GOLDEN_COLUMNS), (
+        f"{case_name}: the golden freezes {sorted(golden['values'])} but "
+        f"regression_cases.GOLDEN_COLUMNS says {sorted(rc.GOLDEN_COLUMNS)} — "
+        "re-capture the goldens."
+    )
+    assert golden["columns_exact_order"] == rc.RESULT_MULTIPLETS_COLUMNS, (
+        f"{case_name}: the golden's column order disagrees with "
+        "regression_cases.RESULT_MULTIPLETS_COLUMNS — re-capture the goldens."
+    )
 
     assert [str(x) for x in df.index] == golden["index"], (
         f"{case_name}: the metabolite row index changed.\n"
@@ -89,7 +96,7 @@ def test_golden_result_multiplets(case_name):
         atol = per_column.get(column, {}).get("atol", tol["default_atol"])
         for metabolite, expected in expected_col.items():
             actual = float(df.at[metabolite, column])
-            if not cells_equal(actual, expected, rtol, atol):
+            if not np.isclose(actual, expected, rtol=rtol, atol=atol, equal_nan=True):
                 rel = (
                     abs(actual - expected) / abs(expected)
                     if expected not in (0.0,) and not math.isnan(expected)
@@ -131,7 +138,9 @@ def test_goldens_never_freeze_the_sd_columns(case_name):
         f"{case_name}: sd column(s) {sorted(leaked)} were golden-compared. They are "
         "not reproducible across dependency stacks — guard them structurally instead."
     )
-    assert frozen == set(golden["golden_columns"])
+    # Against the live constant, never against the golden's own copy of it — a
+    # JSON-vs-JSON comparison was written by one capture run and cannot fail.
+    assert frozen == set(rc.GOLDEN_COLUMNS)
 
 
 # --------------------------------------------------------------------------------
@@ -143,8 +152,8 @@ VARIANT_IDS = list(rc.SYNTHETIC_VARIANTS)
 
 @pytest.fixture(scope="module")
 def synthetic_fits():
-    """Every synthetic variant, fitted once for the whole module."""
-    return {name: rc.run_synthetic_variant(name) for name in rc.SYNTHETIC_VARIANTS}
+    """Every synthetic variant, fitted once per process (shared with the goldens)."""
+    return {name: rc.synthetic_variant_result(name) for name in rc.SYNTHETIC_VARIANTS}
 
 
 @pytest.mark.parametrize("variant", VARIANT_IDS)
@@ -340,21 +349,30 @@ def test_hsvd_components_are_plausible(hsvd_result):
     assert np.isfinite(raw).all(), f"non-finite HSVD parameters:\n{table}"
 
     assert (table["amplitude"] > 0).all(), f"non-positive amplitudes:\n{table}"
-    assert (table["linewidth_hz"] > 0).all(), f"non-positive linewidths:\n{table}"
+    # >= 0, not > 0: HSVDinitializer's dk filter is one-sided (dk < lw_threshold,
+    # pyAMARES/util/hsvd.py), so a dk <= 0 component from an unbounded curve_fit
+    # survives it and the lmfit parameter's min=0 then clips it to exactly 0.0.
+    # Only the vendored backend has been observed here; hlsvdpro (x86_64, numpy 1.x)
+    # differs numerically by design and may produce that clipped edge case.
+    assert (table["linewidth_hz"] >= 0).all(), f"negative linewidths:\n{table}"
     # HSVDinitializer filters on dk < lw_threshold (500 rad/s) before returning.
     assert (table["linewidth_hz"] < 500.0 / np.pi).all(), (
         f"a component survived the linewidth filter it should not have:\n{table}"
     )
 
+    # Sanity bound, not a contract: the library never constrains freq, so the
+    # curve_fit refinement may nudge a component slightly past the +-sw/2 window.
+    # 2x Nyquist would mean the decomposition lost the plot entirely.
     nyquist_ppm = rc.EXAMPLE_SW / 2.0 / rc.EXAMPLE_MHZ
-    assert table["ppm"].abs().max() < nyquist_ppm, (
-        f"a component sits outside the +-{nyquist_ppm:.2f} ppm spectral window:\n"
+    assert table["ppm"].abs().max() < 2.0 * nyquist_ppm, (
+        f"a component sits far outside the +-{nyquist_ppm:.2f} ppm spectral window:\n"
         f"{table}"
     )
 
-    # HSVDinitializer records how much of the data the components explain.
-    assert 0.0 < fidobj.relativeNorm < 1.0, (
-        f"HSVD residual norm ratio {fidobj.relativeNorm!r} is not in (0, 1)"
+    # HSVDinitializer records how much of the data the components explain. The
+    # library does not bound it above by 1, so assert only positive-and-finite.
+    assert np.isfinite(fidobj.relativeNorm) and fidobj.relativeNorm > 0.0, (
+        f"HSVD residual norm ratio {fidobj.relativeNorm!r} is not a positive number"
     )
 
 

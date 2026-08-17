@@ -42,7 +42,11 @@ jobs:
           done
 
       - name: Run notebook tests
-        run: pytest --nbval-lax --current-env tests/
+        # Notebooks only: the numeric regression suite (tests/test_regression.py,
+        # tests/test_api_surface.py) runs in its own workflow on pinned stacks —
+        # its goldens are stack-sensitive and must not be judged by whatever this
+        # job's unpinned resolution happens to install.
+        run: pytest --nbval-lax --current-env tests/*.ipynb
 
       - name: Upload executed notebooks on failure
         if: failure()
