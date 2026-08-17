@@ -42,7 +42,7 @@ jobs:
           - id: numpy2
             os: ubuntu-latest
             python-version: '3.13'
-            pins: "'numpy>=2' 'pandas~=2.3.0'"
+            pins: "'numpy>=2,<3' 'pandas~=2.3.0'"
           # Newest interpreter, newest pandas major.
           - id: pandas-3
             os: ubuntu-latest
