@@ -4,7 +4,11 @@ import matplotlib.pyplot as plt
 import nmrglue as ng
 import numpy as np
 import pandas as pd
-import scipy
+
+# scipy.optimize.curve_fit is used below. `import scipy` alone does not bind the
+# submodule -- it has only ever resolved here because lmfit imports scipy.optimize
+# as a side effect, which is not a contract lmfit owes us.
+import scipy.optimize
 from lmfit import Parameters
 
 from ..util.visualization import preview_HSVD

@@ -293,8 +293,13 @@ def report_amares(outparams, fid_parameters, verbose=False):
     result["name"] = peaklist
     result = result.set_index("name")
     if hasattr(fid_parameters, "peaklist"):
-        # By default, there should be a peak list from the fid_parameters
-        result.reindex(
+        # By default, there should be a peak list from the fid_parameters.
+        # reindex returns a new frame -- discarding it (as this line did until
+        # 0.4.0) left the row order at lmfit's Parameters insertion order, which
+        # happens to coincide with the prior-knowledge column order for every
+        # prior pyAMARES can parse. Bind the result so the stated intent holds
+        # even when it does not.
+        result = result.reindex(
             fid_parameters.peaklist
         )  # reorder to the peaklist from the pk, not the local peaklist
     # fid_parameters.peaklist = peaklist

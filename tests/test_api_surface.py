@@ -111,12 +111,12 @@ def test_result_multiplets_index_is_metabolite_names(fitted_example):
     )
     assert all(name.strip() for name in index), f"empty metabolite name in {index!r}"
     assert len(set(index)) == len(index), f"duplicate metabolite names in {index!r}"
-    # Today this equality is a *coincidence*, not a library guarantee: the
-    # mechanism meant to enforce it is a no-op — pyAMARES/util/report.py calls
-    # ``result.reindex(fid_parameters.peaklist)`` and discards the return value —
-    # so row order is really lmfit parameter insertion order, which happens to
-    # match the prior-file peak order. If this assert ever fails, the root cause
-    # is that discarded reindex, not this test.
+    # Since 0.4.0 this equality is enforced rather than coincidental:
+    # pyAMARES/util/report.py binds ``result = result.reindex(
+    # fid_parameters.peaklist)``. Before that the return value was discarded, so
+    # row order was really lmfit parameter insertion order — which happens to
+    # match the prior-file peak order for every prior pyAMARES can parse, which
+    # is why fixing it left every golden byte-identical.
     assert index == fitted_example.peaklist
 
 
