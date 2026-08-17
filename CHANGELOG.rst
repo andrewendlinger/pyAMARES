@@ -1,6 +1,47 @@
 Latest Changes
 --------------
 
+v0.4.0 (unreleased)
+~~~~~~~~~~~~~~~~~~~
+
+.. note::
+
+   **Fork release.** Everything in this section ships in ``pyamares-xmris`` only — the
+   repackage maintained for `xmris <https://github.com/andrewendlinger/xmris>`_ — and is
+   not part of upstream ``HawkMRS/pyAMARES``. It is the first release whose divergences
+   touch code under ``pyAMARES/``; ``0.3.33`` remains the permanent zero-divergence
+   artifact on PyPI. Every difference, with its evidence, is recorded in
+   `DIVERGENCE.md`_ under the ``D``-entry cited on each line below. Tracked in
+   `pyAMARES issue #1`_ and `xmris issue #158`_.
+
+**Changed**
+  - Lifted the ``numpy<2.0.0`` and ``pandas<2.2.0`` ceilings; only the ceilings were removed, every floor is untouched. A fresh install now resolves to numpy 2 and pandas 3. (D16)
+  - Floored ``nmrglue`` at ``>=0.12``. 0.11 used ``np.dtype('a8')``, removed in numpy 2, and ``import pyAMARES`` pulls nmrglue eagerly — so this, not pyAMARES itself, was the numpy 2 blocker. nmrglue 0.12 imports fine on numpy 1.26.4, so the floor costs nothing on the old stack. (D16, C1)
+  - Python 3.13 and 3.14 are supported and advertised again: both trove classifiers are restored, and the regression corpus passes on both. (D16, reversing D5)
+  - ``python_requires`` stays ``>=3.8``, now on evidence rather than inheritance — with the ceilings gone, 3.8 resolves to numpy 1.24.4 / pandas 2.0.3 / nmrglue 0.12 and all 53 corpus tests pass there. The ``<3.13`` cap once proposed is no longer needed. (D16, closing C4)
+  - Reworded the PyPI description and the README's opening note. The package no longer claims zero algorithm changes; it carries minimal, individually documented compatibility fixes and points at the ledger. (D16)
+  - Emptied ``requirements.txt`` to a comment. Dependency metadata lives in ``setup.py``'s ``install_requires``; an unversioned second copy could only contradict it. The file is kept so upstream merges stay quiet. (D16)
+
+**Fixed**
+  - pandas 3 compatibility. Under PDEP-14 a prior-knowledge ``expr`` column became the ``str`` dtype, where a missing value reads back as ``float`` NaN and reached lmfit as one; ``extract_expr`` now works on an object-dtype frame and a non-string ``expr`` is normalised to ``None``. (D7, D8)
+  - HSVD components no longer lose their names. ``uniquify_dataframe`` selects its grouping column explicitly, since pandas 3 removed passing the grouping column into ``DataFrameGroupBy.apply`` — which had silently turned an assignment into an all-NaN new column, leaving ``HSVDinitializer`` with an empty ``Parameters`` object. (D10)
+  - Unit conversion widens the float32 prior-knowledge columns that cannot hold their converted values, instead of raising ``TypeError: Invalid value ... for dtype 'float32'``. This is the real bug behind the old ``pandas<2.2`` cap: it was never avoided by that cap, only shipped upstream of the release that made it fatal. (D11)
+  - ``fircls1``'s scipy version gate compares ``(major, minor)`` as integers. The old string comparison sorted ``"1.9.0"`` after ``"1.14.0"``, sending scipy 1.2-1.9 down the modern ``firls`` branch, where it raised. (D12)
+  - ``util/hsvd`` imports ``scipy.optimize`` explicitly rather than relying on lmfit's side-effect import and scipy's lazy submodule attribute, neither of which holds across the declared ``scipy>=1.2.1`` floor. (D13)
+  - ``report_amares`` actually applies its documented peaklist reindex — the return value was discarded — under a guard that skips it when the label sets differ, which keeps the ``--use_hsvd`` and ``filter_param_by_ppm`` workflows intact. (D14)
+  - Bounds are tested with ``pd.isna`` rather than ``np.isnan``, which rejects the strings a bound can still be after ``safe_convert_to_numeric``. (D9)
+
+**Added**
+  - A numeric regression suite (``tests/test_regression.py``, ``tests/test_api_surface.py``) with goldens frozen on the 0.3.33 stack (Python 3.12, numpy 1.26.4, pandas 2.1.4). It is what makes the dependency lift checkable: fitted parameters and CRLB columns are compared against the frozen output, and the xmris contact surface — function names, the 13 result column labels, the ``FIDobj`` attributes — is pinned.
+  - An attribution header on ``pyAMARES/libs/hlsvd.py``, a vendored copy of ``hlsvdpropy`` 2.0.2 (BSD 3-Clause, Copyright (c) 2020 Brian J Soher), naming the upstream project, reproducing the license, and listing the local modifications; plus a matching entry in ``docs/source/license.rst``. (D15)
+
+**Known limitations**
+  - The ``sd``, ``sd(ppm)``, ``sd(Hz)`` and ``sd(deg)`` columns are **not validated across dependency stacks** — they come out of an ill-conditioned Fisher matrix whose rank cutoff shifts between LAPACK/scipy builds, and spreads up to ~238% have been observed. They are guarded structurally only (finite, positive, ``sd < amplitude``, proportional to CRLB, growing with noise), never frozen. Every fitted parameter and every CRLB column *is* regression-locked, at the goldens' 1e-4 default tolerance. (C3)
+
+.. _DIVERGENCE.md: https://github.com/andrewendlinger/pyAMARES/blob/pyamares-xmris/DIVERGENCE.md
+.. _pyAMARES issue #1: https://github.com/andrewendlinger/pyAMARES/issues/1
+.. _xmris issue #158: https://github.com/andrewendlinger/xmris/issues/158
+
 v0.3.33
 ~~~~~~~
 
