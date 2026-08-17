@@ -2,7 +2,9 @@ name: Auto Test Installation
 
 on:
   push:
-    branches: [main, dev] 
+    branches: [main, dev, pyamares-xmris]
+  pull_request:
+    branches: [main, pyamares-xmris]
 
 jobs:
   test-install:

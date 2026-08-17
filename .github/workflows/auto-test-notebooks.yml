@@ -2,9 +2,9 @@ name: Auto Test Notebooks
 
 on:
   push:
-    branches: [main, dev] # temporarily add pr-9-rev for testing
+    branches: [main, dev, pyamares-xmris]
   pull_request:
-    branches: [main]
+    branches: [main, pyamares-xmris]
 
 jobs:
   test-notebooks:

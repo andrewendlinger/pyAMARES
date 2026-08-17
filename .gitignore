@@ -32,3 +32,4 @@ __pycache__
 .jupyter_cache
 tests/multiprocess_log.txt
 .vscode
+uv.lock
