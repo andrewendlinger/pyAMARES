@@ -1,4 +1,3 @@
-import itertools
 from copy import deepcopy
 
 import matplotlib.pyplot as plt
@@ -6,30 +5,6 @@ import nmrglue as ng
 import numpy as np
 import scipy
 from scipy.signal import firls, freqz, lfilter
-
-
-def _version_at_least(version, *target):
-    """
-    Compare the leading numeric components of a version string against a target.
-
-    ``"1.9.0" >= "1.14.0"`` is True as a *string* comparison, which is why version
-    gates must not be written with ``>=`` on the raw ``__version__``. Only as many
-    components as ``target`` has are compared, and any non-numeric suffix
-    (``"1.15.0rc1"``, ``"1.18.0.dev0+abc"``) is ignored.
-
-    Args:
-        version (str): A version string such as ``scipy.__version__``.
-        *target (int): The components to compare against, e.g. ``1, 14``.
-
-    Returns:
-        bool: True if ``version`` is at least ``target``.
-    """
-    parts = []
-    for chunk in version.split(".")[: len(target)]:
-        digits = "".join(itertools.takewhile(str.isdigit, chunk))
-        parts.append(int(digits) if digits else 0)
-    parts.extend([0] * (len(target) - len(parts)))
-    return tuple(parts) >= tuple(target)
 
 
 def fircls1(M, wc, ri, sup):
@@ -50,7 +25,18 @@ def fircls1(M, wc, ri, sup):
 
     weights = [1 / ri, 1 / sup]
 
-    if _version_at_least(scipy.__version__, 1, 14):
+    # Compare (major, minor) as integers, not as text: `scipy.__version__ >=
+    # "1.14.0"` is a lexicographic comparison, under which "1.9.0" sorts *after*
+    # "1.14.0" and every scipy 1.2-1.9 would take the modern branch and raise.
+    # A version string with a non-numeric component is assumed to be modern.
+    try:
+        modern_firls = tuple(
+            int(part) for part in scipy.__version__.split(".")[:2]
+        ) >= (1, 14)
+    except ValueError:
+        modern_firls = True
+
+    if modern_firls:
         h = firls(M + 1, bands, desired, weight=weights, fs=2.0)
     else:
         # e.g. Scipy 1.10
