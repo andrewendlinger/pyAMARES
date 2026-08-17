@@ -33,3 +33,4 @@ __pycache__
 tests/multiprocess_log.txt
 .vscode
 uv.lock
+PKG-INFO
