@@ -1,3 +1,66 @@
+# =============================================================================
+# VENDORED THIRD-PARTY CODE -- attribution and license notice
+# =============================================================================
+#
+# This file is a vendored copy of `hlsvdpropy/hlsvd.py` from the **hlsvdpropy**
+# package, version 2.0.2 (the only release on PyPI, 24 July 2023).
+#
+#   Upstream project: https://github.com/bsoher/hlsvdpropy
+#   Upstream package: https://pypi.org/project/hlsvdpropy/
+#   Author:           Brian J. Soher <bsoher@briansoher.com>
+#   Copyright:        Copyright (c) 2020, Brian J Soher. All rights reserved.
+#   License:          BSD 3-Clause -- reproduced in full below.
+#
+# hlsvdpropy is a pure-Python implementation of the HLSVDPRO algorithm and is
+# documented alongside the Vespa-MRS project:
+# https://vespa-mrs.github.io/vespa.io/other_packages/dev_hlsvdpro/
+#
+# pyAMARES uses this copy as the fallback HSVD backend whenever the compiled
+# `hlsvdpro` package is unavailable -- always under numpy >= 2, and on any
+# platform where hlsvdpro ships no wheel (e.g. arm64). See pyAMARES/util/hsvd.py.
+#
+# Local modifications relative to hlsvdpropy 2.0.2, all marked "# Jia" at their
+# site, plus a whole-file reformat to the pyAMARES code style (double quotes,
+# trailing commas, wrapped lines):
+#   * hlsvdpro(): `uk = np.mat(u[:, :k])` -> `uk = u[:, :k].copy()`, since
+#     np.mat was removed in numpy 2.0.
+#   * create_hlsvd_fids(): `dtype=np.complex128` -> `dtype=complex`.
+#   * create_hlsvd_fids(): the sum_results branch returns explicitly instead of
+#     falling through to a shared `return result`.
+# The algorithm itself is unchanged.
+#
+# The full license text is reproduced inline here rather than as a sibling
+# LICENSE file because this package's MANIFEST.in ships no non-Python files
+# from pyAMARES/libs/, so a sibling file would not reach the wheel.
+#
+# -----------------------------------------------------------------------------
+# Copyright (c) 2020, Brian J Soher.
+# All rights reserved.
+#
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are met:
+#
+#     * Redistributions of source code must retain the above copyright
+#       notice, this list of conditions and the following disclaimer.
+#     * Redistributions in binary form must reproduce the above copyright
+#       notice, this list of conditions and the following disclaimer in the
+#       documentation and/or other materials provided with the distribution.
+#     * Neither the name of the <organization> nor the
+#       names of its contributors may be used to endorse or promote products
+#       derived from this software without specific prior written permission.
+#
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+# ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+# WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+# DISCLAIMED. IN NO EVENT SHALL <COPYRIGHT HOLDER> BE LIABLE FOR ANY
+# DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+# (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+# LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+# ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+# SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+# =============================================================================
+
 """This module contains a 'pure Python' implementation of the version 2.x
 HLSVDPRO package.
 
