@@ -292,7 +292,11 @@ def load_parameter_from_csv(filename="params.csv"):
 
     df = pd.read_csv(filename)
     df = df.dropna(how="all")  # Drop rows where all elements are NaN
-    df = df.where(pd.notnull(df), None)  # Conver NaN to pd None
+    # astype(object) first: under pandas >= 3 (PDEP-14) text columns read back as
+    # the `str` dtype, which stores None as a missing value and hands it back as a
+    # float NaN. lmfit needs a real None for "no expression"/"no bound", so the
+    # columns have to be object before the substitution.
+    df = df.astype(object).where(pd.notnull(df), None)  # Convert NaN to pd None
     params = dataframe_to_parameters(df)
     return params
 

@@ -114,7 +114,12 @@ def extract_expr(pk, MHz=120.0):
     Returns:
         pandas.DataFrame: A DataFrame with processed expressions and potential parameter prefixes in cell values.
     """
-    df = deepcopy(pk.iloc[1:6])
+    # object dtype so that the None sentinel returned by process_expression below
+    # survives assignment. Under pandas >= 3 (PDEP-14) a text column is the `str`
+    # dtype, where None is stored as a missing value and reads back as float NaN --
+    # which would silently defeat both `return None` and the `is None` check in
+    # process_df_corrected, and hand lmfit a NaN as an `expr`.
+    df = deepcopy(pk.iloc[1:6]).astype(object)
 
     def process_expression(expr, MHz):
         """
@@ -211,8 +216,13 @@ def parse_bounds(df):
         df_ub (pandas.DataFrame): A DataFrame containing the parsed upper bounds.
     """
     df_bounds = deepcopy(df.iloc[7:])
-    df_lb = pd.DataFrame(index=df_bounds.index, columns=df_bounds.columns)
-    df_ub = pd.DataFrame(index=df_bounds.index, columns=df_bounds.columns)
+    # dtype=object is the truthful dtype: the loop below fills these frames with a
+    # mixture of floats, NaN and raw strings via .at[]. Leaving the dtype implicit
+    # makes the result depend on whatever pandas infers for an empty frame, which
+    # has changed across pandas majors. Everything downstream is normalised by the
+    # safe_convert_to_numeric maps in generateparameter().
+    df_lb = pd.DataFrame(index=df_bounds.index, columns=df_bounds.columns, dtype=object)
+    df_ub = pd.DataFrame(index=df_bounds.index, columns=df_bounds.columns, dtype=object)
 
     for col in df_bounds.columns:
         for idx in df_bounds.index:
@@ -369,10 +379,17 @@ def generateparameter(
             lval = df_lb2[peak].iloc[i]
             uval = df_ub2[peak].iloc[i]
             expr = df_expr[peak].iloc[i]
-            # Handle NaN values for bounds
-            if np.isnan(lval):
+            # lmfit expects either a string expression or None. Anything else --
+            # notably the float NaN a `str`-dtype column yields for a missing cell
+            # under pandas >= 3 -- means "no expression".
+            if not isinstance(expr, str):
+                expr = None
+            # Handle NaN values for bounds. pd.isna rather than np.isnan: it agrees
+            # with np.isnan on floats but also copes with None and with the strings
+            # that survive safe_convert_to_numeric when a bound is not numeric.
+            if pd.isna(lval):
                 lval = -np.inf
-            if np.isnan(uval):
+            if pd.isna(uval):
                 uval = np.inf
             name = para + "_" + peak
             if (para == "ak") and scale_amplitude != 1.0:
