@@ -1,0 +1,10 @@
+name: Auto Test Regression Corpus
+
+on:
+  push:
+    branches: [main, dev, pyamares-xmris]
+  pull_request:
+
+jobs:
+  test-regression:
+    uses: ./.github/workflows/test-regression.yml

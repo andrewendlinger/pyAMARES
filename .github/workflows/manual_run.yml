@@ -12,3 +12,6 @@ jobs:
 
   test-notebooks:
     uses: ./.github/workflows/test-notebooks.yml
+
+  test-regression:
+    uses: ./.github/workflows/test-regression.yml
