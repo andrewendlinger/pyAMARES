@@ -419,28 +419,119 @@ def test_hsvd_backend_selection():
 # --------------------------------------------------------------------------------
 
 
+def _initialize_rejecting_lossy_setitem(prior_path):
+    """``initialize_FID`` with pandas' lossy-setitem FutureWarning promoted to an error.
+
+    ``unitconverter`` writes float64 conversion results into columns that
+    ``safe_convert_to_numeric``'s ``downcast="float"`` left at float32. Where the
+    value has no float32 representation that is a lossy setitem, which pandas <=
+    2.3 performs anyway after widening the column itself -- warning only -- while
+    pandas 3 raises ``TypeError: Invalid value ... for dtype 'float32'``.
+
+    Promoting just that warning is what makes these tests bite on **every**
+    supported pandas rather than only on pandas 3: without
+    ``_widen_columns_that_cannot_hold`` the call below raises here too. The filter
+    is matched on the message rather than the category so an unrelated future
+    deprecation inside ``initialize_FID`` cannot turn these tests red.
+    """
+    import warnings
+
+    import pyAMARES
+
+    rc.quiet()
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "error", message=".*incompatible dtype.*", category=FutureWarning
+        )
+        return pyAMARES.initialize_FID(
+            fid=None, priorknowledgefile=prior_path, preview=False
+        )
+
+
 def test_non_float32_representable_phase_survives_unit_conversion():
     """A 180-degree prior phase must load on every pandas.
 
-    ``safe_convert_to_numeric`` downcasts numeric prior-knowledge cells to
-    ``float32``, and ``unitconverter`` writes ``np.deg2rad(180) ==
-    3.141592653589793`` back into that column -- a float64 value with no float32
-    representation. pandas <= 2.3 upcast the column silently (FutureWarning);
-    pandas 3 raises ``TypeError: Invalid value '3.141592653589793' for dtype
-    'float32'``.
+    Pinned on ``tests/Table1.csv``, the shipped example that declares two peaks at
+    180 degrees; neither golden prior reaches this path, because both declare
+    every phase as 0 or as an expression. The assert is on the exact float64
+    value -- a silent float32 round trip would yield 3.1415927410125732.
 
-    Neither golden prior reaches this path -- both declare every phase as 0 or as
-    an expression -- so it is pinned here on ``tests/Table1.csv``, which declares
-    two peaks at 180 degrees. The assert is on the exact float64 value: a silent
-    float32 round trip would yield 3.1415927410125732.
+    Note that Table1 states those phases under *equal* bounds, so
+    ``generateparameter`` takes its ``lval == uval`` shortcut and reads the value
+    from the object-dtype bounds frame, never from the converted column. That is
+    why this test alone does not pin the widening (no-op the helper and it still
+    passes on the value assert) and why the warning filter above, plus
+    :func:`test_unitconverter_survives_a_lossy_float32_writeback`, are needed.
+    """
+    obj = _initialize_rejecting_lossy_setitem(os.path.join(rc.TESTS_DIR, "Table1.csv"))
+    assert obj.initialParams["phi_Tau"].value == math.radians(180.0)
+    assert obj.initialParams["phi_Tau2"].value == math.radians(180.0)
+
+
+def test_unitconverter_survives_a_lossy_float32_writeback():
+    """All three unit conversions must survive a float64 row over float32 columns.
+
+    ``tests/priors/lossy_setitem.csv`` is built so that every one of
+    ``unitconverter``'s writes is lossy for the ``Wide`` column: an amplitude that
+    overflows float32 keeps the sibling ``Big`` column at float64, so each row
+    cross-section is float64, and ``Wide`` carries a 180 degree phase under
+    unequal bounds so the converted value is read back out of the column rather
+    than out of the bounds frame.
+
+    Every assert is on an exact float64 value, each of which a float32 round trip
+    would visibly change (12.000000178813934 -> 12.0, 7*pi -> 21.991148, pi ->
+    3.1415927410125732).
+    """
+    prior = os.path.join(rc.TESTS_DIR, "priors", "lossy_setitem.csv")
+    obj = _initialize_rejecting_lossy_setitem(prior)
+
+    # The stored cell is float32(0.1), widened -- not re-rounded -- on the way out.
+    assert obj.initialParams["freq_Wide"].value == float(np.float32(0.1)) * 120.0
+    assert obj.initialParams["dk_Wide"].value == 7.0 * np.pi
+    assert obj.initialParams["phi_Wide"].value == math.radians(180.0)
+    # Unequal bounds, i.e. the value really did come through the converted column.
+    assert obj.initialParams["phi_Wide"].min < obj.initialParams["phi_Wide"].max
+
+
+def test_hsvd_fit_on_a_prior_object_keeps_its_fitted_rows():
+    """A fitted peak set that diverges from ``peaklist`` must not be reindexed away.
+
+    ``report_amares`` reorders ``result_multiplets`` to the prior-knowledge peak
+    order. Binding that ``reindex`` is only safe while the two label sets agree:
+    on a divergent set it drops every fitted peak and injects an all-NaN row per
+    unfitted prior name.
+
+    Two supported workflows diverge. This one is ``amaresFit --use_hsvd``: a
+    FIDobj built from a prior knowledge file -- so it *has* a ``peaklist`` -- is
+    then fitted with HSVD-derived parameters whose peaks are named "1".."N". The
+    two sets share no label at all, so an unguarded reindex empties the table
+    completely.
     """
     import pyAMARES
 
     rc.quiet()
-    obj = pyAMARES.initialize_FID(
-        fid=None,
-        priorknowledgefile=os.path.join(rc.TESTS_DIR, "Table1.csv"),
+    fidobj = rc.initialize_example_fid()
+    assert fidobj.peaklist, "the example FIDobj should carry a prior peaklist"
+
+    hsvd_params = pyAMARES.HSVDinitializer(
+        fid_parameters=fidobj,
+        num_of_component=rc.HSVD_NUM_COMPONENTS,
         preview=False,
+        verbose=False,
     )
-    assert obj.initialParams["phi_Tau"].value == math.radians(180.0)
-    assert obj.initialParams["phi_Tau2"].value == math.radians(180.0)
+    fitted = pyAMARES.fitAMARES(
+        fid_parameters=fidobj,
+        fitting_parameters=hsvd_params,
+        method="least_squares",
+        ifplot=False,
+        inplace=False,
+    )
+    result = fitted.result_multiplets
+    assert not set(result.index) & set(fidobj.peaklist), (
+        "this test is only meaningful while the HSVD peak names and the prior "
+        f"peak names are disjoint, got {list(result.index)!r}"
+    )
+    assert len(result) > 0, "the fitted table lost every row"
+    assert result["amplitude"].notna().all(), (
+        f"result_multiplets was reindexed against the prior peaklist:\n{result}"
+    )

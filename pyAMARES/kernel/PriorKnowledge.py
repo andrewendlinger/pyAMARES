@@ -204,7 +204,11 @@ def _widen_columns_that_cannot_hold(df, values):
     for col, value in values.items():
         dtype = df[col].dtype
         if dtype.kind != "f" or dtype.itemsize >= 8:
-            continue  # object, integer, or already float64 -- nothing to lose
+            # object, integer, or already float64 -- nothing to lose. Skipping
+            # object columns first is also what keeps the check below safe: a
+            # value can only be non-numeric (an expression string that survived
+            # extractini) if its own column is object.
+            continue
         # float() on both sides is load-bearing: comparing the narrowed numpy
         # scalar against the original directly is a lie under numpy 2, whose
         # NEP 50 rules demote the weak Python float to float32 and report the
@@ -229,17 +233,35 @@ def unitconverter(df_ini, MHz=120.0):
         pandas.DataFrame: A DataFrame with converted unit values in specified rows.
     """
     df = deepcopy(df_ini)
+
+    # All three conversions are written the same way -- compute the converted
+    # values at the row's own dtype, widen only the columns that cannot hold the
+    # result, then write. Splitting the `*=` into a read and a write is what lets
+    # the widening happen in between; the arithmetic is unchanged, so a column
+    # that needs no widening keeps its float32 dtype and its float32 arithmetic.
+    #
+    # The multiplications need the guard as much as the phase does: whenever one
+    # peak column stays object -- extractini's `except Exception: return expr`
+    # keeps an unevaluable expression string -- the whole row cross-section is
+    # object, the arithmetic promotes to float64, and the writeback into the
+    # float32 sibling columns is a lossy setitem.
     if "chemicalshift" in df.index:
-        df.loc["chemicalshift", df.notna().loc["chemicalshift"]] *= MHz
+        mask = df.notna().loc["chemicalshift"]
+        values = df.loc["chemicalshift", mask] * MHz
+        df = _widen_columns_that_cannot_hold(df, values)
+        df.loc["chemicalshift", mask] = values
 
     if "linewidth" in df.index:
-        df.loc["linewidth", df.notna().loc["linewidth"]] *= np.pi
+        mask = df.notna().loc["linewidth"]
+        values = df.loc["linewidth", mask] * np.pi
+        df = _widen_columns_that_cannot_hold(df, values)
+        df.loc["linewidth", mask] = values
 
     if "phase" in df.index:
-        phase_mask = df.notna().loc["phase"]
-        phase_rad = np.deg2rad(df.loc["phase"][phase_mask].astype(float))
-        df = _widen_columns_that_cannot_hold(df, phase_rad)
-        df.loc["phase", phase_mask] = phase_rad
+        mask = df.notna().loc["phase"]
+        values = np.deg2rad(df.loc["phase", mask].astype(float))
+        df = _widen_columns_that_cannot_hold(df, values)
+        df.loc["phase", mask] = values
 
     return df
 

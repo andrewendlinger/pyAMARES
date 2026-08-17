@@ -111,13 +111,19 @@ def test_result_multiplets_index_is_metabolite_names(fitted_example):
     )
     assert all(name.strip() for name in index), f"empty metabolite name in {index!r}"
     assert len(set(index)) == len(index), f"duplicate metabolite names in {index!r}"
-    # Since 0.4.0 this equality is enforced rather than coincidental:
-    # pyAMARES/util/report.py binds ``result = result.reindex(
-    # fid_parameters.peaklist)``. Before that the return value was discarded, so
-    # row order was really lmfit parameter insertion order — which happens to
-    # match the prior-file peak order for every prior pyAMARES can parse, which
-    # is why fixing it left every golden byte-identical.
     assert index == fitted_example.peaklist
+    # The name check above cannot stand on its own. Since 0.4.0 the order is
+    # enforced by pyAMARES/util/report.py binding ``result = result.reindex(
+    # fid_parameters.peaklist)`` when the two label sets agree -- and reindex
+    # produces exactly those names whether or not any fitted value survives it.
+    # So assert on the values too: a reindex against a divergent label set fills
+    # the table with NaN while leaving this index perfect.
+    values = fitted_example.result_multiplets
+    for column in ("amplitude", "chem shift(ppm)", "LW(Hz)", "phase(deg)", "SNR"):
+        assert values[column].notna().all(), (
+            f"{column!r} has NaN rows, so result_multiplets was reindexed against "
+            f"a peak set the fit does not cover:\n{values[column]}"
+        )
 
 
 def test_xmris_shape_fit_produces_the_same_table_shape(fitted_example_xmris_shape):
