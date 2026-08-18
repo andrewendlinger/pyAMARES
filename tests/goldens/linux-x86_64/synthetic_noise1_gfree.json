@@ -1,0 +1,114 @@
+{
+  "meta": {
+    "captured_utc": "2026-08-18T11:14:28Z",
+    "pyamares": "0.4.0",
+    "python": "3.12.13",
+    "numpy": "1.26.4",
+    "pandas": "2.1.4",
+    "scipy": "1.17.1",
+    "lmfit": "1.3.4",
+    "nmrglue": "0.12",
+    "platform": "Linux-6.17.0-1022-azure-x86_64-with-glibc2.39",
+    "machine": "x86_64",
+    "case": "synthetic_noise1_gfree"
+  },
+  "index": [
+    "Alpha",
+    "Beta",
+    "Gamma"
+  ],
+  "columns_exact_order": [
+    "amplitude",
+    "sd",
+    "CRLB(%)",
+    "chem shift(ppm)",
+    "sd(ppm)",
+    "CRLB(cs%) ",
+    "LW(Hz)",
+    "sd(Hz)",
+    "CRLB(LW%)",
+    "phase(deg)",
+    "sd(deg)",
+    "CRLB(phase%)",
+    "g",
+    "g_sd",
+    "g (%)",
+    "SNR"
+  ],
+  "golden_columns": [
+    "amplitude",
+    "chem shift(ppm)",
+    "LW(Hz)",
+    "phase(deg)",
+    "SNR",
+    "CRLB(%)",
+    "CRLB(cs%) ",
+    "CRLB(LW%)",
+    "CRLB(phase%)"
+  ],
+  "structural_columns": [
+    "sd",
+    "sd(ppm)",
+    "sd(Hz)",
+    "sd(deg)"
+  ],
+  "values": {
+    "amplitude": {
+      "Alpha": 1.0001482786850016,
+      "Beta": 0.5996225926228435,
+      "Gamma": 0.2999407812588981
+    },
+    "chem shift(ppm)": {
+      "Alpha": -6.326608243392308e-06,
+      "Beta": 4.9999936733917565,
+      "Gamma": -7.999999535377828
+    },
+    "LW(Hz)": {
+      "Alpha": 20.390959203502153,
+      "Beta": 34.53459245785438,
+      "Gamma": 15.010649281267856
+    },
+    "phase(deg)": {
+      "Alpha": 9.991441573263529,
+      "Beta": 9.991441573263529,
+      "Gamma": 9.965136727233954
+    },
+    "SNR": {
+      "Alpha": 354.7069028845497,
+      "Beta": 212.65873997053592,
+      "Gamma": 106.37529238064508
+    },
+    "CRLB(%)": {
+      "Alpha": 0.03860372853049731,
+      "Beta": 0.07870917903582288,
+      "Gamma": 0.09129984262576357
+    },
+    "CRLB(cs%) ": {
+      "Alpha": 554.0335968671516,
+      "Beta": 0.0007010315912416511,
+      "Gamma": 0.001011386654800183
+    },
+    "CRLB(LW%)": {
+      "Alpha": 2.678858242421042,
+      "Beta": 7.379013889466912,
+      "Gamma": 0.1293479298747121
+    },
+    "CRLB(phase%)": {
+      "Alpha": 0.16032494614290693,
+      "Beta": 0.16032494614290693,
+      "Gamma": 0.525085841154378
+    }
+  },
+  "tolerances": {
+    "default_rtol": 0.0001,
+    "default_atol": 0.0,
+    "per_column": {
+      "chem shift(ppm)": {
+        "atol": 1e-06
+      },
+      "CRLB(cs%) ": {
+        "rtol": 0.001
+      }
+    }
+  }
+}
