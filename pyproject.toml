@@ -1,8 +1,11 @@
 [build-system]
-# >=64 is the PEP 660 floor (editable installs without a setup.py shim); PEP 621
-# metadata itself needs only >=61. Python 3.8 resolves setuptools 75.3.x, which
-# satisfies both. `wheel` is not listed: setuptools has vendored it since 70.1.
-requires = ["setuptools>=64"]
+# The binding floor is 70.1, the release that vendored `wheel` into setuptools --
+# below it the dropped `wheel` dependency would be needed to build one at all.
+# (PEP 621 metadata itself needs only >=61, and PEP 660 editable installs, which
+# now matter because there is no setup.py to fall back to, need >=64.) Python 3.8
+# resolves setuptools 75.3.4, the last line that supports it, which satisfies all
+# three.
+requires = ["setuptools>=70.1"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -165,6 +168,12 @@ zip-safe = false
 # Equivalent to setup.py's find_packages(exclude=["tests", "tests.*"]) -- the
 # wheel's top_level.txt must contain `pyAMARES` and nothing else (D4).
 include = ["pyAMARES*"]
+# Required for that equivalence: this table defaults to namespaces = true, i.e.
+# find_namespace_packages, which would additionally declare `pyAMARES.examples`
+# (a data directory with no __init__.py) as a package -- 7 discovered instead of
+# find_packages' 6. Its data files reach the wheel through MANIFEST.in and
+# include-package-data either way; declaring it a package is what differs.
+namespaces = false
 
 [tool.setuptools.dynamic]
 # Read statically out of the literal assignment in pyAMARES/__init__.py --

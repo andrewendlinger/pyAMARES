@@ -10,6 +10,29 @@ on:
         type: string
 
 jobs:
+  build:
+    name: Build distributions the way publish.yml does
+    runs-on: ubuntu-latest
+    # Mirrors the build half of publish.yml so a backend or metadata breakage
+    # fails an ordinary PR instead of a pushed v* tag, which is irreversible.
+    # This is the standing guard for D19's deferred PEP 639 migration: the
+    # `license` table, `[tool.setuptools] license-files` and the BSD trove
+    # classifier are all deprecated with removal announced for 2027-02-18, and
+    # publish.yml resolves setuptools fresh at tag time. When the removal lands,
+    # this job goes red first. Deliberately not solved by capping setuptools --
+    # a cap would silently age the build environment instead of surfacing this.
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Build sdist and wheel
+        run: uv build
+
+      - name: Check metadata
+        run: uvx twine check dist/*
+
   test:
     name: Test installation on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}

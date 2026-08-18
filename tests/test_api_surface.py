@@ -609,3 +609,65 @@ def test_progress_bar_honours_notebook_false():
     from pyAMARES.util.multiprocessing import _select_tqdm
 
     assert _select_tqdm(notebook=False) is tqdm.tqdm
+
+
+#: The seven extras D18 defines, in the order pyproject.toml declares them.
+DECLARED_EXTRAS = ["matlab", "excel", "hlsvd", "jupyter", "docs", "ruff", "dev"]
+
+#: ``pyproject.toml`` as seen from the checkout. ``None`` when the tests are run
+#: against an installed copy from outside a source tree, which is the one case
+#: the composition test cannot check.
+PYPROJECT_PATH = os.path.join(os.path.dirname(rc.TESTS_DIR), "pyproject.toml")
+
+
+def _load_optional_dependencies():
+    """``[project.optional-dependencies]``, as declared, order preserved."""
+    import tomllib
+
+    with open(PYPROJECT_PATH, "rb") as handle:
+        return tomllib.load(handle)["project"]["optional-dependencies"]
+
+
+@pytest.mark.skipif(
+    sys.version_info < (3, 11),
+    reason=(
+        "needs tomllib (3.11+); the invariant is a property of pyproject.toml, "
+        "not of the running interpreter, so the 3.11+ legs cover it"
+    ),
+)
+@pytest.mark.skipif(
+    not os.path.exists(PYPROJECT_PATH),
+    reason="not run from a source checkout, so there is no pyproject.toml to read",
+)
+def test_extras_composition_matches_the_documented_layout():
+    """D18's extras layout, which D19 turned from code into a comment.
+
+    ``setup.py`` built ``jupyter`` and ``dev`` by list concatenation, so the
+    composition was enforced by the language. TOML cannot compose lists, so
+    pyproject.toml repeats the members literally and only a comment says they
+    must agree. This test is what actually holds them together — and because the
+    published ``Requires-Dist`` order follows these lists, it is also what keeps
+    the wheel metadata stable (D19).
+    """
+    extras = _load_optional_dependencies()
+
+    assert list(extras) == DECLARED_EXTRAS, "the set or order of extras changed"
+
+    # dev == jupyter + docs + ruff, exactly, duplicates and order included.
+    assert extras["dev"] == extras["jupyter"] + extras["docs"] + extras["ruff"], (
+        "dev must stay the literal concatenation of jupyter + docs + ruff"
+    )
+
+    # jupyter ends with matlab + excel, the two extras it absorbs.
+    absorbed = extras["matlab"] + extras["excel"]
+    assert extras["jupyter"][-len(absorbed) :] == absorbed, (
+        "jupyter must still end with the matlab and excel members"
+    )
+
+    # hlsvd is deliberately part of no other extra (D18): it is a niche numeric
+    # opt-in that is inert on every stack except x86_64 py3.8 with numpy 1.x.
+    for name, members in extras.items():
+        if name == "hlsvd":
+            continue
+        shared = set(members) & set(extras["hlsvd"])
+        assert not shared, "hlsvd leaked into the %r extra: %r" % (name, sorted(shared))

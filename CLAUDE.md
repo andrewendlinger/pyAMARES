@@ -21,10 +21,16 @@ packaging metadata and, from 0.4.0 on, targeted source fixes.
 ## Build & environments
 
 - Since D19 all distribution metadata lives in **`pyproject.toml`**'s `[project]` table
-  (PEP 621); **there is no `setup.py`**. The build backend is setuptools (`>=64`, the PEP 660
-  floor) and the wheel is pure Python (`py3-none-any`). `license` deliberately stays the
-  pre-PEP-639 `{text = "BSD-3-Clause"}` table and `license-files` stays under
-  `[tool.setuptools]` — the SPDX form needs setuptools≥77, which dropped py3.8.
+  (PEP 621); **there is no `setup.py`** and no `setup.cfg`. The build backend is setuptools
+  (`>=70.1`, the release that vendored `wheel`) and the wheel is pure Python
+  (`py3-none-any`). `license` deliberately stays the pre-PEP-639 `{text = "BSD-3-Clause"}`
+  table and `license-files` stays under `[tool.setuptools]` — the SPDX form needs
+  setuptools≥77, which dropped py3.8. Both are deprecated with removal announced for
+  **2027-02-18**; `test-install.yml`'s `build` job mirrors `publish.yml` so that lands on a
+  PR rather than on an irreversible tag.
+- `[tool.setuptools.packages.find]` must keep `namespaces = false`: the table defaults to
+  true, which would declare the data-only `pyAMARES/examples` a package (7 vs
+  `find_packages`' 6).
 - **Not a uv project** — there must be no committed `uv.lock` (it is gitignored). Test against
   specific stacks with `uv run --no-project --python 3.X --with ... --with .` or scratch venvs
   plus `uv pip install --no-deps -e .`.
@@ -35,13 +41,16 @@ packaging metadata and, from 0.4.0 on, targeted source fixes.
   build time via `[tool.setuptools.dynamic] version = {attr = "pyAMARES.__version__"}` — the
   package is not imported to build it. `__author__` still lives there too, but the published
   author metadata is hardcoded in `[project] authors`.
-- Since D18 `install_requires` is only what the package imports — numpy, scipy, pandas,
-  matplotlib, lmfit, sympy, nmrglue, jinja2, tqdm. Everything else is an extra: `matlab`
+- Since D18 `[project] dependencies` is only what the package imports — numpy, scipy,
+  pandas, matplotlib, lmfit, sympy, nmrglue, jinja2, tqdm. Everything else is an extra
+  under `[project.optional-dependencies]`: `matlab`
   (mat73, v7.3 `.mat`), `excel` (openpyxl + xlrd, spreadsheet priors), `hlsvd` (hlsvdpro,
   x86_64-marked), `jupyter` (notebook/ipykernel/ipython/ipywidgets/requests + matlab +
   excel), plus `docs`, `ruff`, `dev`. Install with `.[jupyter]` for anything
   notebook-shaped; a bare install must stay bare — `.github/workflows/test-install.yml`
-  asserts it.
+  asserts it. TOML cannot compose lists, so `jupyter` repeats matlab+excel and `dev`
+  repeats jupyter+docs+ruff **literally**; keep them in sync —
+  `test_extras_composition_matches_the_documented_layout` is what enforces it.
 - Lint: `ruff check .` and `ruff format --check .` (line length 88; `pyAMARES/libs/hlsvd.py`
   is excluded as vendored third-party code).
 

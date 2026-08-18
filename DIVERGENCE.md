@@ -44,7 +44,9 @@ exactly one.
 
 # D — Divergences (shipped in 0.3.33)
 
-Nothing under `pyAMARES/` is modified. All entries below are `setup.py` metadata.
+D1–D5, the entries in *this* section, are `setup.py` metadata only — nothing under
+`pyAMARES/` is modified by any of them. That stops being true from 0.4.0 on: D6 onward
+change code, and D19 moves the metadata itself out of `setup.py` into `pyproject.toml`.
 
 ## D1 — `hlsvdpro` declared with a PEP 508 marker
 
@@ -631,6 +633,12 @@ recording this was added.
                existed only for the `--include-docs` sdist flag, and nothing in
                the repo, the workflows or the docs ever passed it — it defaulted
                to off and extended a `data_files` that was the empty list.
+               setup.cfg goes too: its only stanza was `[egg_info]` with
+               `tag_build`/`tag_date` set to their own defaults, nothing in the
+               repo read it, and leaving an inert legacy config next to a PEP 621
+               table is exactly the two-sources-of-truth ambiguity this entry
+               exists to remove. It is provably free: setuptools regenerates that
+               same file into the sdist regardless — see Behaviour.
                MANIFEST.in is unchanged and still governs sdist contents.
                Field by field:
                  name / description / readme / classifiers / dependencies —
@@ -653,21 +661,43 @@ recording this was added.
                  extras_require -> [project.optional-dependencies], with every
                    member written out literally. setup.py composed `jupyter` and
                    `dev` by list concatenation and TOML cannot, so matlab+excel
-                   are repeated inside jupyter and jupyter+docs+ruff inside dev,
-                   under a comment saying they must be kept in sync. The published
-                   Requires-Dist lines are identical either way.
+                   are repeated inside jupyter and jupyter+docs+ruff inside dev.
+                   The published Requires-Dist lines are identical either way. But
+                   what the language used to guarantee is now only a convention,
+                   and a comment is not enough to hold it:
+                   `test_extras_composition_matches_the_documented_layout` in
+                   tests/test_api_surface.py parses pyproject.toml and asserts the
+                   composition — the seven extra names and their order,
+                   `dev == jupyter + docs + ruff` compared as lists (duplicates and
+                   order included, which is also what keeps the Requires-Dist order
+                   stable), that jupyter ends with matlab+excel, and that hlsvd
+                   appears in no other extra (D18). It needs tomllib, so it skips
+                   below Python 3.11; the invariant is a property of the file, not
+                   of the interpreter, so the 3.11+ legs carry it.
                  packages=find_packages(exclude=["tests", "tests.*"]) ->
-                   [tool.setuptools.packages.find] include = ["pyAMARES*"], the
-                   positive form of the same selection. D4's invariant is what is
-                   actually verified: top_level.txt holds `pyAMARES` and nothing
-                   else.
+                   [tool.setuptools.packages.find] include = ["pyAMARES*"] plus
+                   `namespaces = false`, the positive form of the same selection.
+                   The flag is load-bearing, not decoration: this table defaults
+                   to namespaces = true, i.e. find_namespace_packages, which also
+                   declares the data-only `pyAMARES/examples` (no __init__.py) a
+                   package — 7 discovered against find_packages' 6. Measured both
+                   ways; with the flag the discovered list is equal to setup.py's,
+                   element for element. The examples data reaches the wheel
+                   through MANIFEST.in and include-package-data either way, which
+                   is why the file lists agree regardless and only the declared
+                   package set differs. D4's invariant is verified on top of that:
+                   top_level.txt holds `pyAMARES` and nothing else.
                  zip_safe / include_package_data / license_files ->
                    [tool.setuptools]. entry_points -> [project.scripts].
                [build-system] requires goes from ["setuptools>=42", "wheel"] to
-               ["setuptools>=64"]: 61 is the PEP 621 floor and 64 the PEP 660 one,
-               which now binds because `pip install -e .` has no setup.py to fall
-               back to; `wheel` goes because setuptools has vendored it since 70.1.
-               Python 3.8 resolves setuptools 75.3.4, satisfying both.
+               ["setuptools>=70.1"]. Three floors are in play and the highest
+               wins: 61 for PEP 621 metadata, 64 for the PEP 660 editable install
+               (which now binds, because `pip install -e .` has no setup.py to
+               fall back to), and 70.1 for dropping `wheel` from the list at all —
+               that is the release which vendored it into setuptools, so a build
+               env in [64, 70.1) would have neither the vendored copy nor the
+               declared dependency and could not produce a wheel. Python 3.8
+               resolves setuptools 75.3.4, which clears all three.
                [tool.ruff] target-version: py37 -> py38, matching requires-python.
     PEP 639:   deliberately deferred. The SPDX form — `license = "BSD-3-Clause"`
                as a plain string plus a `license-files` key inside [project] —
@@ -676,9 +706,27 @@ recording this was added.
                stays the pre-639 `{text = "BSD-3-Clause"}` table, `license-files`
                stays under [tool.setuptools], and the
                `License :: OSI Approved :: BSD License` classifier stays. Modern
-               setuptools warns about all three (deprecated; removal announced for
-               2027-02-18) and the warnings are accepted for now. Revisit when the
-               3.8 floor goes — that is the only blocker.
+               setuptools warns about all three: deprecated, with removal
+               announced for **2027-02-18**.
+               That deadline has teeth, because of where it would land. publish.yml
+               resolves its build environment fresh at tag time, and a pushed v*
+               tag publishes irreversibly — so the first thing to notice the
+               removal would have been a release. Two ways not to fix it: capping
+               setuptools would silently freeze the build environment and hide the
+               problem rather than solve it, and nothing else in the repo pins a
+               backend. What is done instead is to make ordinary CI build the way
+               publish.yml does: `.github/workflows/test-install.yml` gains a
+               `build` job (ubuntu-latest, astral-sh/setup-uv, `uv build`,
+               `uvx twine check dist/*`) that runs on every PR. Any backend or
+               metadata breakage — this one included — now fails a PR months
+               before it could reach a tag.
+               Remediation when it fires, in preference order: adopt PEP 639 SPDX
+               (`license = "BSD-3-Clause"` as a string, `license-files` moved into
+               [project], BSD trove classifier dropped) once the Python 3.8 floor
+               goes, since that is the only thing blocking it; or, if 3.8 is still
+               supported at that point, adopt it anyway and let 3.8 builds fall
+               back — the floor, not the license syntax, is the decision to make
+               then.
     Behaviour: none at runtime. The wheel's file list is identical, so the
                installed package is what it was. The published METADATA differs in
                exactly two places, both structural:
@@ -700,7 +748,15 @@ recording this was added.
                `(platform_machine == ...) and extra == "hlsvd"` parenthesisation —
                all 7 Provides-Extra lines, and the 181-line README body.
                entry_points.txt, top_level.txt and WHEEL are byte-identical. The
-               sdist loses exactly one member: setup.py itself.
+               sdist loses exactly one member: setup.py, 64 entries to 63. Two
+               files were deleted but only one leaves the sdist — setuptools'
+               sdist command *generates* a setup.cfg holding the `[egg_info]`
+               defaults whether or not the source tree has one, and the generated
+               file is byte-identical to the one removed here (verified by
+               extracting both). So deleting setup.cfg is a source-tree change
+               with no effect on anything published, which is the whole reason it
+               was safe. Nothing else enters or leaves the sdist, which is what
+               confirms CustomSDist's removal is a no-op.
     Evidence:  `uv build` before and after on the same checkout, diffed
                field-for-field (procedure and full output in PR #20); `twine
                check` passes on both wheel and sdist. The regression corpus is
