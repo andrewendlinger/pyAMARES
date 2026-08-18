@@ -117,7 +117,10 @@ def read_fidall(filename):
     if is_mat_file_v7_3(filename):
         try:
             import mat73
-        except ImportError as exc:  # mat73 is an optional extra (D18)
+        except ModuleNotFoundError as exc:
+            # Only an *absent* mat73 gets the install instruction (D18) -- an
+            # installed-but-broken one (e.g. an h5py ABI mismatch) raises
+            # ImportError and must keep its own message.
             raise ImportError(
                 "Reading MATLAB v7.3 .mat files requires mat73. "
                 "Install it with: pip install 'pyamares-xmris[matlab]'"

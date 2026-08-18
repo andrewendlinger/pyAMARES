@@ -396,13 +396,15 @@ def generateparameter(
                 fname, index_col=0, sheet_name=0, comment="#"
             )  # , skiprows=find_header_row(fname), comment='#')
         except ImportError as exc:
-            # pandas raises ImportError when its Excel engine is missing. Both
+            # pandas raises ImportError both when its Excel engine is missing and
+            # when the installed one is too old, so the message covers both. Both
             # engines are optional extras since D18.
             raise ImportError(
-                "Reading an Excel prior knowledge file (%s) requires a pandas "
-                "Excel engine: openpyxl for .xlsx, xlrd for legacy .xls. "
-                "Install them with: pip install 'pyamares-xmris[excel]' "
-                "-- or save the prior knowledge as CSV, which needs no extra." % fname
+                "Reading an Excel prior knowledge file (%s) requires an Excel "
+                "reader that is installed and recent enough (openpyxl for .xlsx, "
+                "xlrd for legacy .xls) -- missing or too old. Install or upgrade "
+                "with: pip install 'pyamares-xmris[excel]' -- or convert the "
+                "prior knowledge to CSV, which needs no extra." % fname
             ) from exc
     elif fname.endswith(".csv"):
         pk = pd.read_csv(
