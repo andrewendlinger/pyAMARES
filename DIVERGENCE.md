@@ -614,6 +614,131 @@ recording this was added.
                fixed stays fixed, now twice over: the marker still excludes arm64,
                and the default install does not mention hlsvdpro at all.
 
+## D19 — distribution metadata moves to `pyproject.toml` (PEP 621)
+
+    Status:    staged for 0.5.0 (unreleased)
+    Symptom:   the project carried two build files, with the wrong one
+               authoritative: setup.py held every metadata field while
+               pyproject.toml held only [build-system] and [tool.ruff]. Anything
+               that wants to read the metadata — PyPI tooling, a dependency
+               scanner, uv, a reviewer — had to execute a Python file to learn the
+               dependency list, and that file ran real logic while doing it: an
+               AST parse of pyAMARES/__init__.py, and until D18 a build-host
+               platform.machine() check that baked the builder's architecture into
+               the published wheel (D1).
+    Change:    every field moves into pyproject.toml's [project] table, verbatim.
+               setup.py is deleted outright, CustomSDist with it: that class
+               existed only for the `--include-docs` sdist flag, and nothing in
+               the repo, the workflows or the docs ever passed it — it defaulted
+               to off and extended a `data_files` that was the empty list.
+               MANIFEST.in is unchanged and still governs sdist contents.
+               Field by field:
+                 name / description / readme / classifiers / dependencies —
+                   carried over verbatim.
+                 author + author_email -> [project] authors, as two entries, one
+                   {name} and one {email}. setuptools maps a {name}-only entry to
+                   `Author:` and an {email}-only entry to `Author-email:`, which
+                   is exactly the pair setup.py emitted; a single {name, email}
+                   entry would collapse both into one quoted `Author-email:` line
+                   and drop `Author:` altogether. The value is now hardcoded
+                   rather than read from `pyAMARES.__author__`; the runtime
+                   attribute stays where it is.
+                 version -> [project] dynamic plus [tool.setuptools.dynamic]
+                   version = {attr = "pyAMARES.__version__"}. setuptools reads the
+                   literal statically (AST, no import), so the build environment
+                   still needs none of the runtime dependencies and
+                   pyAMARES/__init__.py stays the single source of truth.
+                 url + project_urls -> [project.urls], with `url` becoming the
+                   `Homepage` entry — see Behaviour.
+                 extras_require -> [project.optional-dependencies], with every
+                   member written out literally. setup.py composed `jupyter` and
+                   `dev` by list concatenation and TOML cannot, so matlab+excel
+                   are repeated inside jupyter and jupyter+docs+ruff inside dev,
+                   under a comment saying they must be kept in sync. The published
+                   Requires-Dist lines are identical either way.
+                 packages=find_packages(exclude=["tests", "tests.*"]) ->
+                   [tool.setuptools.packages.find] include = ["pyAMARES*"], the
+                   positive form of the same selection. D4's invariant is what is
+                   actually verified: top_level.txt holds `pyAMARES` and nothing
+                   else.
+                 zip_safe / include_package_data / license_files ->
+                   [tool.setuptools]. entry_points -> [project.scripts].
+               [build-system] requires goes from ["setuptools>=42", "wheel"] to
+               ["setuptools>=64"]: 61 is the PEP 621 floor and 64 the PEP 660 one,
+               which now binds because `pip install -e .` has no setup.py to fall
+               back to; `wheel` goes because setuptools has vendored it since 70.1.
+               Python 3.8 resolves setuptools 75.3.4, satisfying both.
+               [tool.ruff] target-version: py37 -> py38, matching requires-python.
+    PEP 639:   deliberately deferred. The SPDX form — `license = "BSD-3-Clause"`
+               as a plain string plus a `license-files` key inside [project] —
+               requires setuptools >= 77, and setuptools dropped Python 3.8 after
+               the 75.x line, which is this package's floor (D16). So `license`
+               stays the pre-639 `{text = "BSD-3-Clause"}` table, `license-files`
+               stays under [tool.setuptools], and the
+               `License :: OSI Approved :: BSD License` classifier stays. Modern
+               setuptools warns about all three (deprecated; removal announced for
+               2027-02-18) and the warnings are accepted for now. Revisit when the
+               3.8 floor goes — that is the only blocker.
+    Behaviour: none at runtime. The wheel's file list is identical, so the
+               installed package is what it was. The published METADATA differs in
+               exactly two places, both structural:
+                 - `Home-page: <url>` becomes `Project-URL: Homepage, <url>`.
+                   PEP 621 has no `url` field; `Homepage` under [project.urls] is
+                   its defined translation, the URL string is unchanged, and PyPI
+                   renders the same "Homepage" link. Metadata 2.1 already listed
+                   Home-page as obsolete.
+                 - the `Dynamic:` block shrinks from 13 lines to one
+                   (`license-file`). `Dynamic` names the fields a build backend
+                   may still fill in; with setup.py setuptools could prove nothing
+                   static and listed everything, and with a [project] table every
+                   field except the filesystem-derived license-file is statically
+                   declared. Metadata-Version stays 2.4.
+               Everything else matches line for line: Name, Version, Summary,
+               Requires-Python, Description-Content-Type, License, License-File,
+               all 11 Classifier lines, all 49 Requires-Dist lines — including
+               marker spacing and the
+               `(platform_machine == ...) and extra == "hlsvd"` parenthesisation —
+               all 7 Provides-Extra lines, and the 181-line README body.
+               entry_points.txt, top_level.txt and WHEEL are byte-identical. The
+               sdist loses exactly one member: setup.py itself.
+    Evidence:  `uv build` before and after on the same checkout, diffed
+               field-for-field (procedure and full output in PR #20); `twine
+               check` passes on both wheel and sdist. The regression corpus is
+               green on the frozen golden stack (py3.12 / numpy 1.26.4 /
+               pandas 2.1.4) both as an editable install and against the built
+               wheel installed into a clean venv, and on an unpinned py3.13
+               resolution (numpy 2.5.2 / pandas 3.0.5). A py3.8 build environment
+               — setuptools 75.3.4, the last line supporting 3.8 — produces the
+               same metadata and a working PEP 660 editable install, resolving
+               D16's documented floor. publish.yml runs `uv build` and needs no
+               change.
+
+## D20 — `parameters_to_dataframe_result` builds its frame once
+
+    Status:    staged for 0.5.0 (unreleased)
+    Symptom:   none visible in output; the cost is quadratic work, not a wrong
+               answer
+    Cause:     in kernel/lmfit.py, `df = pd.DataFrame(data)` sat inside the
+               per-parameter loop, one indent level too deep. Every iteration
+               built a whole DataFrame out of the partially filled column lists
+               and discarded it; only the last one, built from complete data, was
+               returned. For N parameters that is N constructions over
+               1+2+...+N cells to produce a frame of N rows.
+    Change:    dedent the construction to after the loop.
+    Behaviour: identical for every non-empty Parameters object — the frame
+               returned is the one the old code's final iteration produced. One
+               edge case differs: on an *empty* Parameters the loop never ran, so
+               `df` was never bound and the function raised `NameError`
+               (UnboundLocalError); it now returns an empty DataFrame with the
+               seven declared columns. That is the more defensible result, and no
+               caller in this repo passes an empty Parameters — report_amares and
+               the CRLB path both receive fitted output.
+    Evidence:  the regression corpus is green and every golden is byte-identical.
+               parameters_to_dataframe_result is on the fitAMARES path, so every
+               case in the corpus exercises it.
+    Origin:    issue #10. The Styler half of that issue is not taken here and the
+               issue stays open.
+
 ---
 
 # C — Candidates (undecided)
