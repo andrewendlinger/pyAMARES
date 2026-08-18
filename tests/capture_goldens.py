@@ -35,6 +35,7 @@ import json
 import os
 import platform
 import sys
+from typing import Callable, NamedTuple
 
 import numpy as np
 
@@ -78,59 +79,10 @@ DEFAULT_TOLERANCES = {
 }
 
 
-#: Tolerances for the vendored-HSVD-backend golden. Sized from measurement, not
-#: guessed — :data:`HSVD_COMMENT`, written into the golden itself, records the
-#: configurations that were compared and the drift each one showed.
-#:
-#: Much tighter than :data:`DEFAULT_TOLERANCES` because this case is a single
-#: linear-algebra pass — one SVD, one least-squares solve, one eigendecomposition,
-#: one ``zgelss`` — with no iterative optimizer to amplify a last-ulp difference
-#: into a visible one. The fit goldens go through ``leastsq``/``least_squares``,
-#: which is exactly why they need 1e-4 (and 5e-3 on the real-data case) where this
-#: one holds 1e-9 across every stack and platform measured.
-HSVD_TOLERANCES = {
-    "default_rtol": 1e-9,
-    "default_atol": 0.0,
-    # ``per_column`` even though this payload calls them fields: one tolerance
-    # schema for every golden family, so ``test_regression.py`` resolves both with
-    # the same helper. The frozen fit goldens already spell it this way and cannot
-    # be edited, so this is the name that had to win.
-    "per_column": {
-        # One component sits at -0.0135 Hz, so a relative tolerance says nothing
-        # about it; the floor is what actually guards that cell.
-        "frequency_hz": {"atol": 1e-9},
-        # Same story for that component's phase, which is 0.0989 degrees.
-        "phase_deg": {"atol": 1e-8},
-    },
-}
-
-#: Written into the vendored-HSVD golden as its ``comment``.
-HSVD_COMMENT = (
-    "Tolerances are measured, not guessed. The runner was compared across six "
-    "configurations on 2026-08-18: darwin-arm64 py3.12/numpy 1.26.4/scipy 1.17.1 "
-    "(the capture stack, reference); darwin-arm64 py3.13/numpy 2.5.2/scipy 1.18.0; "
-    "linux-aarch64 and linux-x86_64 py3.12/numpy 1.26.4/scipy 1.17.1 in containers; "
-    "linux-x86_64 py3.13/numpy 2.5.2/scipy 1.18.0 in a container; and a real GitHub "
-    "ubuntu-latest x86_64 runner on py3.12/numpy 1.26.4/scipy 1.17.1 via "
-    "capture-goldens.yml. nsv_found was 8 in every one. Worst relative deviation "
-    "over every frozen value and every configuration: 1.1e-10 — and that maximum "
-    "belongs entirely to the two near-zero cells (the component at -0.0135 Hz and "
-    "its 0.0989 deg phase). The worst on any cell where a relative comparison "
-    "means something is 5.4e-13 (damping), 3.1e-13 (amplitude), 2.6e-13 (phase "
-    "away from zero), 3.7e-15 (frequency away from zero) and 1.9e-15 (singular "
-    "values). default_rtol 1e-9 "
-    "is therefore ~10x the worst measured drift overall and ~1800x the worst "
-    "meaningful one. The two atol floors absorb the near-zero cells: frequency_hz "
-    "1e-9 Hz is ~440x the worst measured absolute frequency drift (2.3e-12 Hz) and "
-    "still 1e-17 ppm at 120 MHz; phase_deg 1e-8 deg is ~870x the worst measured "
-    "absolute phase drift (1.1e-11 deg). damping needs no floor — no component "
-    "comes near zero (|damping| runs 5.8e-3 to 2.0e-2, worst drift 1800x inside "
-    "the default). No phase comes near +-180 deg either (max |phase| 149.4 deg), "
-    "so the comparison is plain rather than angular; an input that put a component "
-    "on the wrap point would need an angular comparison this golden does not "
-    "implement. nmrglue is recorded in meta but is not on this case's code path at "
-    "all — the vendored backend is pure scipy — so its version cannot matter here."
-)
+#: Per-case tolerance blocks and comments live on the registry entry in
+#: ``regression_cases`` (``GoldenCase.tolerances`` / ``.comment``), not here: they
+#: describe one dataset's measured drift, so baking them into a payload builder
+#: would stamp them onto every future case of the same kind.
 
 
 def capture_meta() -> dict:
@@ -158,7 +110,16 @@ def capture_meta() -> dict:
     }
 
 
-def golden_payload(case_name: str, result_multiplets) -> dict:
+def _tolerances(case, default: dict) -> dict:
+    """The case's own tolerance block if it declares one, else the kind's default.
+
+    Deep-copied through JSON either way, so a payload can never alias — and later
+    mutate — the live constant it was built from.
+    """
+    return json.loads(json.dumps(case.tolerances if case.tolerances else default))
+
+
+def golden_payload(case_name: str, result_multiplets, case) -> dict:
     """Turn one ``result_multiplets`` table into the golden JSON payload."""
     df = result_multiplets
     missing = [c for c in rc.GOLDEN_COLUMNS if c not in df.columns]
@@ -177,22 +138,34 @@ def golden_payload(case_name: str, result_multiplets) -> dict:
         "golden_columns": list(rc.GOLDEN_COLUMNS),
         "structural_columns": list(rc.STRUCTURAL_COLUMNS),
         "values": values,
-        "tolerances": json.loads(json.dumps(DEFAULT_TOLERANCES)),
+        "tolerances": _tolerances(case, DEFAULT_TOLERANCES),
     }
 
 
-def hsvd_golden_payload(case_name: str, result: dict) -> dict:
-    """Turn :func:`regression_cases.run_hsvd_vendored_backend_case` into a payload.
+def hsvd_golden_payload(case_name: str, result: dict, case) -> dict:
+    """Turn an HSVD-decomposition runner's result into a payload.
 
-    A different shape from :func:`golden_payload` on purpose: this case freezes a
+    A different shape from :func:`golden_payload` on purpose: this kind freezes a
     decomposition (rows of components plus the singular-value head), not a
     ``result_multiplets`` table, so it carries ``components`` /
     ``top_singular_values`` rather than ``values`` / ``index`` / column lists.
+
+    Every number that describes *this dataset* — the tolerance floors, the
+    narrative — comes off the registry entry, so the builder stays generic over
+    the kind. There is no default tolerance block for it: an HSVD case must
+    declare its own measured tolerances, because there is no meaningful figure to
+    fall back to.
     """
     components = result["components"]
     missing = [f for f in rc.HSVD_COMPONENT_FIELDS if f not in components.columns]
     if missing:
         raise RuntimeError(f"{case_name}: HSVD components lost fields {missing!r}")
+    if not case.tolerances:
+        raise RuntimeError(
+            f"{case_name}: an {rc.KIND_HSVD_COMPONENTS} case must declare its own "
+            "measured tolerances on its registry entry — there is no default that "
+            "would mean anything for a decomposition."
+        )
     meta = capture_meta()
     meta["case"] = case_name
     return {
@@ -210,43 +183,54 @@ def hsvd_golden_payload(case_name: str, result: dict) -> dict:
             for row in components.index
         ],
         "top_singular_values": [float(x) for x in result["top_singular_values"]],
-        "tolerances": json.loads(json.dumps(HSVD_TOLERANCES)),
-        "comment": HSVD_COMMENT,
+        "tolerances": _tolerances(case, {}),
+        "comment": case.comment,
     }
 
 
-def _result_multiplets_payload(case_name: str, fidobj) -> dict:
+def _result_multiplets_payload(case_name: str, fidobj, case) -> dict:
     """Adapter: a fit runner returns the FID object, not the table."""
-    return golden_payload(case_name, fidobj.result_multiplets)
+    return golden_payload(case_name, fidobj.result_multiplets, case)
 
 
-#: Payload kind -> builder, the one thing ``capture_goldens.py`` adds to the case
+class PayloadHandler(NamedTuple):
+    """Everything ``capture_goldens.py`` knows about one payload kind."""
+
+    #: ``(case_name, runner_result, GoldenCase) -> payload dict``.
+    build: Callable
+    #: ``payload -> "8 components"``; how the capture log describes what it wrote.
+    #: Declared per kind rather than sniffed off the payload's keys — reading the
+    #: shape back out of the thing you just built is a guess, and it silently
+    #: mislabels the first kind that happens to share a key name.
+    describe: Callable
+
+
+#: Payload kind -> handler, the one thing ``capture_goldens.py`` adds to the case
 #: registry in ``regression_cases``. Looked up by name so a case declaring a kind
 #: nobody can serialise fails loudly at capture time instead of silently.
-PAYLOAD_BUILDERS = {
-    rc.KIND_RESULT_MULTIPLETS: _result_multiplets_payload,
-    rc.KIND_HSVD_COMPONENTS: hsvd_golden_payload,
+PAYLOAD_HANDLERS = {
+    rc.KIND_RESULT_MULTIPLETS: PayloadHandler(
+        _result_multiplets_payload, lambda payload: f"{len(payload['index'])} rows"
+    ),
+    rc.KIND_HSVD_COMPONENTS: PayloadHandler(
+        hsvd_golden_payload,
+        lambda payload: f"{len(payload['components'])} components",
+    ),
 }
 
 
-def capture_case(case_name: str) -> dict:
-    """Run one case and return its golden payload, whatever its payload shape."""
-    kind, runner = rc.GOLDEN_CASE_REGISTRY[case_name]
+def capture_case(case_name: str):
+    """Run one case; return ``(payload, one-line description)``."""
+    case = rc.GOLDEN_CASE_REGISTRY[case_name]
     try:
-        build = PAYLOAD_BUILDERS[kind]
+        handler = PAYLOAD_HANDLERS[case.kind]
     except KeyError:
         raise RuntimeError(
-            f"{case_name}: payload kind {kind!r} has no builder in "
-            f"capture_goldens.PAYLOAD_BUILDERS (known: {sorted(PAYLOAD_BUILDERS)})"
+            f"{case_name}: payload kind {case.kind!r} has no handler in "
+            f"capture_goldens.PAYLOAD_HANDLERS (known: {sorted(PAYLOAD_HANDLERS)})"
         ) from None
-    return build(case_name, runner())
-
-
-def payload_size(payload: dict) -> str:
-    """A one-line 'what got written' description for the capture log."""
-    if "components" in payload:
-        return f"{len(payload['components'])} components"
-    return f"{len(payload['index'])} rows"
+    payload = handler.build(case_name, case.runner(), case)
+    return payload, handler.describe(payload)
 
 
 def write_golden(payload: dict, path: str) -> None:
@@ -330,9 +314,9 @@ def main(argv=None) -> int:
 
     rc.quiet()
     for name in case_names:
-        payload = capture_case(name)
+        payload, description = capture_case(name)
         write_golden(payload, targets[name])
-        print(f"wrote {targets[name]}  ({payload_size(payload)})")
+        print(f"wrote {targets[name]}  ({description})")
     return 0
 
 

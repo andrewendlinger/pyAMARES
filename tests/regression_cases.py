@@ -26,6 +26,7 @@ import sys
 os.environ.setdefault("MPLBACKEND", "Agg")
 
 from copy import deepcopy  # noqa: E402
+from typing import Callable, NamedTuple, Optional  # noqa: E402
 
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
@@ -61,12 +62,22 @@ def platform_goldens_dir() -> str:
     return os.path.join(GOLDENS_DIR, platform_goldens_key())
 
 
-#: The grammar :func:`platform_goldens_key` builds: two lowercase-led words joined
-#: by a hyphen, the second allowed digits, underscores and dots (``linux-x86_64``,
-#: ``darwin-arm64``, ``win32-AMD64`` — hence the case-insensitive machine half).
-#: Single source for both the test that policies ``tests/goldens/`` subdirectories
-#: and ``capture_goldens.py``'s refusal to write a platform set on the wrong host.
-PLATFORM_DIR_RE = re.compile(r"^[a-z][a-z0-9]*-[A-Za-z0-9_.]+$")
+#: Every value ``sys.platform`` is documented to take, which is what makes this an
+#: allowlist rather than a pattern. An earlier ``[a-z][a-z0-9]*-...`` regex was a
+#: pattern, and it was wrong in both directions: ``goldens-v2/`` passed the
+#: directory policing while never matching any host (so it looked reviewed and was
+#: dead), and ``capture_goldens.py`` refused to write into a scratch path like
+#: ``/tmp/goldens-check/`` that its own docstring advertises. Only these prefixes
+#: can ever be the first half of a :func:`platform_goldens_key`, so only these
+#: name a platform golden set.
+PLATFORM_PREFIXES = frozenset(
+    {"linux", "darwin", "win32", "cygwin", "freebsd", "aix", "sunos", "emscripten"}
+)
+
+#: The machine half — ``platform.machine()`` — is free-form vendor text, so it is
+#: matched by shape: digits, letters, underscores and dots (``x86_64``, ``arm64``,
+#: ``AMD64`` — hence case-insensitive, ``armv7l``, ``ppc64le``).
+PLATFORM_MACHINE_RE = re.compile(r"^[A-Za-z0-9_.]+$")
 
 
 def looks_like_platform_dir(name: str) -> bool:
@@ -74,9 +85,19 @@ def looks_like_platform_dir(name: str) -> bool:
 
     A *shape* test, not a match against this host: it is what lets a guard say
     "you are writing into something that claims to be a platform set" before
-    checking whether it is *this* platform's.
+    checking whether it is *this* platform's. Single source for both the test that
+    polices ``tests/goldens/`` subdirectories and ``capture_goldens.py``'s refusal
+    to write a platform set on the wrong host.
+
+    Some of these carry a version suffix on older interpreters (``linux2``,
+    ``freebsd13``), so a prefix that is not an exact hit is retried with the
+    trailing digits stripped — while ``win32``, whose digits are part of the name,
+    matches exactly and never reaches that fallback.
     """
-    return bool(PLATFORM_DIR_RE.match(name))
+    head, sep, machine = name.partition("-")
+    if not sep or not PLATFORM_MACHINE_RE.match(machine):
+        return False
+    return head in PLATFORM_PREFIXES or head.rstrip("0123456789") in PLATFORM_PREFIXES
 
 
 # --- Case A: the documented README quick-start acquisition parameters -------------
@@ -135,6 +156,63 @@ HSVD_VENDORED_CASE = "hsvd_vendored_backend"
 #: about 9e-8 relative off true degrees. Both quirks are upstream behaviour and are
 #: frozen as they are, not corrected here.
 HSVD_COMPONENT_FIELDS = ["frequency_hz", "damping", "amplitude", "phase_deg"]
+
+#: Tolerances written into :data:`HSVD_VENDORED_CASE`'s golden. Per case, not per
+#: kind — they are this FID's measured drift floors and mean nothing for another
+#: dataset. Sized from measurement, not guessed; :data:`HSVD_VENDORED_COMMENT`,
+#: which travels into the golden alongside them, records what was measured.
+#:
+#: Much tighter than ``capture_goldens.DEFAULT_TOLERANCES`` because this case is a
+#: single linear-algebra pass — one SVD, one least-squares solve, one
+#: eigendecomposition, one ``zgelss`` — with no iterative optimizer to amplify a
+#: last-ulp difference into a visible one. The fit goldens go through
+#: ``leastsq``/``least_squares``, which is exactly why they need 1e-4 (and 5e-3 on
+#: the real-data case) where this one holds 1e-9 across every stack and platform
+#: measured.
+HSVD_VENDORED_TOLERANCES = {
+    "default_rtol": 1e-9,
+    "default_atol": 0.0,
+    # ``per_column`` even though this payload calls them fields: one tolerance
+    # schema for every golden family, so ``test_regression.py`` resolves both with
+    # the same helper. The frozen fit goldens already spell it this way and cannot
+    # be edited, so this is the name that had to win.
+    "per_column": {
+        # One component sits at -0.0135 Hz, so a relative tolerance says nothing
+        # about it; the floor is what actually guards that cell.
+        "frequency_hz": {"atol": 1e-9},
+        # Same story for that component's phase, which is 0.0989 degrees.
+        "phase_deg": {"atol": 1e-8},
+    },
+}
+
+#: Written into that golden as its ``comment``. Reproduces the committed stamp
+#: verbatim — moving it here must not re-word the frozen file.
+HSVD_VENDORED_COMMENT = (
+    "Tolerances are measured, not guessed. The runner was compared across six "
+    "configurations on 2026-08-18: darwin-arm64 py3.12/numpy 1.26.4/scipy 1.17.1 "
+    "(the capture stack, reference); darwin-arm64 py3.13/numpy 2.5.2/scipy 1.18.0; "
+    "linux-aarch64 and linux-x86_64 py3.12/numpy 1.26.4/scipy 1.17.1 in containers; "
+    "linux-x86_64 py3.13/numpy 2.5.2/scipy 1.18.0 in a container; and a real GitHub "
+    "ubuntu-latest x86_64 runner on py3.12/numpy 1.26.4/scipy 1.17.1 via "
+    "capture-goldens.yml. nsv_found was 8 in every one. Worst relative deviation "
+    "over every frozen value and every configuration: 1.1e-10 — and that maximum "
+    "belongs entirely to the two near-zero cells (the component at -0.0135 Hz and "
+    "its 0.0989 deg phase). The worst on any cell where a relative comparison "
+    "means something is 5.4e-13 (damping), 3.1e-13 (amplitude), 2.6e-13 (phase "
+    "away from zero), 3.7e-15 (frequency away from zero) and 1.9e-15 (singular "
+    "values). default_rtol 1e-9 "
+    "is therefore ~10x the worst measured drift overall and ~1800x the worst "
+    "meaningful one. The two atol floors absorb the near-zero cells: frequency_hz "
+    "1e-9 Hz is ~440x the worst measured absolute frequency drift (2.3e-12 Hz) and "
+    "still 1e-17 ppm at 120 MHz; phase_deg 1e-8 deg is ~870x the worst measured "
+    "absolute phase drift (1.1e-11 deg). damping needs no floor — no component "
+    "comes near zero (|damping| runs 5.8e-3 to 2.0e-2, worst drift 1800x inside "
+    "the default). No phase comes near +-180 deg either (max |phase| 149.4 deg), "
+    "so the comparison is plain rather than angular; an input that put a component "
+    "on the wrap point would need an angular comparison this golden does not "
+    "implement. nmrglue is recorded in meta but is not on this case's code path at "
+    "all — the vendored backend is pure scipy — so its version cannot matter here."
+)
 
 
 def quiet() -> None:
@@ -403,38 +481,80 @@ KIND_RESULT_MULTIPLETS = "result_multiplets"
 #: Payload kind of a case whose golden freezes an HSVD decomposition.
 KIND_HSVD_COMPONENTS = "hsvd_components"
 
-#: **The** golden-case registry: ``name -> (payload kind, runner)``, in capture
-#: order (dicts preserve insertion order). Everything else about the case set is
-#: derived from this one mapping — the name set the goldens directory is policed
-#: against, the capture order, and which payload builder ``capture_goldens.py``
-#: dispatches to — so a case can never exist in one list and be missing from
-#: another. It used to: a name present in the validation set but absent from the
-#: capture order made ``--only <case>`` a silent no-op that wrote nothing and
-#: exited 0.
+
+class GoldenCase(NamedTuple):
+    """One entry of :data:`GOLDEN_CASE_REGISTRY`.
+
+    ``tolerances`` and ``comment`` are **per case**, not per kind. They used to
+    be module constants inside the payload builder for the HSVD kind, which meant
+    the builder baked one dataset's measured drift floors and one dataset's
+    narrative into every golden of that kind: a second HSVD case would have
+    captured cleanly and been stamped with the wrong numbers. A case that leaves
+    ``tolerances`` at ``None`` gets the builder's default block, which is how all
+    three fit cases are captured.
+    """
+
+    #: Which payload shape the golden takes — one of the ``KIND_*`` constants.
+    kind: str
+    #: Zero-argument callable returning whatever that kind's builder consumes.
+    runner: Callable
+    #: Tolerance block written into the golden; ``None`` means the kind's default.
+    tolerances: Optional[dict] = None
+    #: Free text written into the golden's ``comment``, for kinds that carry one.
+    comment: str = ""
+
+
+#: **The** golden-case registry: ``name -> GoldenCase``, in capture order (dicts
+#: preserve insertion order). Everything else about the case set is derived from
+#: this one mapping — the name set the goldens directory is policed against, the
+#: capture order, which payload builder ``capture_goldens.py`` dispatches to, and
+#: which cases each comparison test parametrizes over — so a case can never exist
+#: in one list and be missing from another. It used to: a name present in the
+#: validation set but absent from the capture order made ``--only <case>`` a
+#: silent no-op that wrote nothing and exited 0.
 #:
 #: Adding a case is two touchpoints, and no more: an entry here, and a capture.
-#: A case of a *new* kind is three — the kind also needs a payload builder in
-#: ``capture_goldens.PAYLOAD_BUILDERS``, which raises by name if you forget.
+#: A case of a *new* kind is three — the kind also needs a handler in
+#: ``capture_goldens.PAYLOAD_HANDLERS`` (which raises by name if you forget) and
+#: a comparison test parametrized over that kind.
 #:
 #: The synthetic entry reuses the named :data:`SYNTHETIC_VARIANTS` spec through
 #: the memoized runner, so the golden and the physics tests cannot drift apart.
 GOLDEN_CASE_REGISTRY = {
-    "example_readme": (KIND_RESULT_MULTIPLETS, run_example_case),
-    "example_xmris_shape": (KIND_RESULT_MULTIPLETS, run_example_xmris_shape_case),
-    "synthetic_noise1_gfree": (
+    "example_readme": GoldenCase(KIND_RESULT_MULTIPLETS, run_example_case),
+    "example_xmris_shape": GoldenCase(
+        KIND_RESULT_MULTIPLETS, run_example_xmris_shape_case
+    ),
+    "synthetic_noise1_gfree": GoldenCase(
         KIND_RESULT_MULTIPLETS,
         lambda: synthetic_variant_result("noise1_gfree")[0],
     ),
-    HSVD_VENDORED_CASE: (KIND_HSVD_COMPONENTS, run_hsvd_vendored_backend_case),
+    HSVD_VENDORED_CASE: GoldenCase(
+        KIND_HSVD_COMPONENTS,
+        run_hsvd_vendored_backend_case,
+        tolerances=HSVD_VENDORED_TOLERANCES,
+        comment=HSVD_VENDORED_COMMENT,
+    ),
 }
+
+
+def case_names_of_kind(kind: str):
+    """Every registry name of one payload kind, in capture order.
+
+    What the comparison tests parametrize over, so a case added to the registry
+    is compared as well as captured — the HSVD test used to name its one case
+    directly, which would have left a second case of that kind frozen but never
+    checked.
+    """
+    return [n for n, case in GOLDEN_CASE_REGISTRY.items() if case.kind == kind]
+
 
 #: The fit cases only — name -> runner returning the FID object whose
 #: ``result_multiplets`` gets frozen. Derived, never edited: the tests that are
 #: specific to that payload shape parametrize over it.
 GOLDEN_CASES = {
-    name: runner
-    for name, (kind, runner) in GOLDEN_CASE_REGISTRY.items()
-    if kind == KIND_RESULT_MULTIPLETS
+    name: GOLDEN_CASE_REGISTRY[name].runner
+    for name in case_names_of_kind(KIND_RESULT_MULTIPLETS)
 }
 
 #: Every golden name, whatever the payload shape. ``tests/goldens/`` and each of
@@ -449,13 +569,15 @@ _CASE_CACHE: dict = {}
 
 
 def golden_case_result(name: str):
-    """Run a golden case at most once per process and return its fitted FID object.
+    """Run any registry case at most once per process and return its result.
 
-    Fitting is cheap but not free, and several tests read the same case, so the
-    result is memoized. Callers must treat the returned object as read-only.
+    Whatever that case's runner returns — the fitted FID object for a fit case,
+    the decomposition dict for an HSVD one. Running is cheap but not free, and
+    several tests read the same case, so the result is memoized. Callers must
+    treat the returned object as read-only.
     """
     if name not in _CASE_CACHE:
-        _CASE_CACHE[name] = GOLDEN_CASES[name]()
+        _CASE_CACHE[name] = GOLDEN_CASE_REGISTRY[name].runner()
     return _CASE_CACHE[name]
 
 
