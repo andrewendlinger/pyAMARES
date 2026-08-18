@@ -163,7 +163,7 @@ Building Documentation Locally
 
 To build the documentation locally:
 
-1.  Ensure you've installed the necessary dependencies. This is usually covered by ``pip install -e ".[dev]"`` or specifically via ``pip install -e ".[doc]"``.
+1.  Ensure you've installed the necessary dependencies. This is usually covered by ``pip install -e ".[dev]"`` or specifically via ``pip install -e ".[docs]"``.
 2.  Navigate to the documentation directory (often ``docs/``) and build using ``Sphinx``:
 
     .. code-block:: bash

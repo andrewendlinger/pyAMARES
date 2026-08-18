@@ -28,6 +28,48 @@ def redirect_stdout_to_file(filename):
             sys.stdout, sys.stderr = old_stdout, old_stderr
 
 
+def _select_tqdm(notebook=True):
+    """Pick the progress-bar class, falling back to the text bar.
+
+    ``tqdm.notebook`` imports cleanly *without* ipywidgets — it only raises
+    ``ImportError("IProgress not found. Please update jupyter and ipywidgets")``
+    when the first bar is **constructed**, which here is inside the fitting loop,
+    after the process pool has already been filled. Since D18 ipywidgets is an
+    optional extra, so that fallback is made explicit rather than left to crash a
+    parallel fit that worked in every earlier release.
+
+    Args:
+        notebook (bool): whether the caller asked for the Jupyter widget bar.
+
+    Returns:
+        type: ``tqdm.notebook.tqdm`` when it is usable, else ``tqdm.tqdm``.
+    """
+    from tqdm import tqdm as tqdm_text
+
+    if not notebook:
+        return tqdm_text
+
+    try:
+        import tqdm.notebook as tqdm_notebook_module
+    except ImportError as exc:  # tqdm too old to have the submodule
+        reason = str(exc)
+    else:
+        # tqdm sets IProgress to None when ipywidgets is missing or too old, and
+        # only raises from status_printer once a bar is built. Reading the flag
+        # detects that without constructing (and half-destructing) a throwaway
+        # widget. A tqdm too old to define the name at all is assumed usable.
+        if getattr(tqdm_notebook_module, "IProgress", False) is not None:
+            return tqdm_notebook_module.tqdm
+        reason = "ipywidgets is missing or too old"
+
+    logger.warning(
+        "Using the text progress bar: the notebook progress bar needs ipywidgets "
+        "(%s). Install it with: pip install 'pyamares-xmris[jupyter]'",
+        reason,
+    )
+    return tqdm_text
+
+
 def fit_dataset(
     fid_current,
     FIDobj_shared,
@@ -127,15 +169,14 @@ def run_parallel_fitting_with_progress(
         objective_func (callable, optional): Custom objective function for ``pyAMARES.lmfit.fitAMARES``. If None,
           the default objective function will be used. Defaults to None.
         notebook (bool, optional): If True, uses tqdm.notebook for progress display in Jupyter notebooks.
-          If False, uses standard tqdm. Defaults to True.
+          If False, uses standard tqdm. Defaults to True. The notebook bar needs ipywidgets
+          (``pip install 'pyamares-xmris[jupyter]'``); without it the text bar is used instead,
+          with a warning.
 
     Returns:
         list: A list of fitting result objects (e.g., pandas DataFrames) for each FID dataset.
     """
-    if notebook:
-        from tqdm.notebook import tqdm
-    else:
-        from tqdm import tqdm
+    tqdm = _select_tqdm(notebook)
 
     FIDobj_shared = deepcopy(FIDobj_shared)
     try:

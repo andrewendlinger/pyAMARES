@@ -4,9 +4,10 @@
 .. note::
 
    **This is** ``pyamares-xmris``, **a repackage — not the original project.** It is a
-   faithful BSD repackage of `HawkMRS/pyAMARES <https://github.com/hawkMRS/pyAMARES>`_ that
-   declares ``hlsvdpro`` with a PEP 508 environment marker, so that ``pip install`` succeeds
-   on Apple Silicon (arm64), and carries **only minimal, individually documented
+   faithful BSD repackage of `HawkMRS/pyAMARES <https://github.com/hawkMRS/pyAMARES>`_ with
+   corrected dependency metadata — the default install does not declare ``hlsvdpro``, so
+   ``pip install`` succeeds on Apple Silicon (arm64), and it installs only what the fitting
+   engine actually imports (see Installation below) — and carries **only minimal, individually documented
    compatibility fixes** — from 0.4.0, the ones that make the source correct under numpy 2,
    pandas 3 and Python 3.14. The fitting algorithms are untouched, and **the import name is
    still** ``import pyAMARES``.
@@ -69,6 +70,21 @@ Installation
 
 (The import name remains ``pyAMARES``. To install the original upstream distribution
 instead, use ``pip install pyAMARES`` — note that it does not install on arm64.)
+
+That is the **fitting engine only**: numpy, scipy, pandas, matplotlib, lmfit, sympy,
+nmrglue, jinja2 and tqdm. Everything else lives behind an extra, and each one is additive:
+
+.. code-block:: bash
+
+   pip install 'pyamares-xmris[jupyter]'   # the notebooks and interactive workflows: Jupyter, requests, and the matlab/excel extras below
+   pip install 'pyamares-xmris[matlab]'    # mat73, for reading MATLAB v7.3 (HDF5) .mat files
+   pip install 'pyamares-xmris[excel]'     # openpyxl and xlrd, for .xlsx / .xls prior knowledge spreadsheets
+   pip install 'pyamares-xmris[hlsvd]'     # hlsvdpro, the optional native HSVD backend (x86_64 only; unused on numpy 2+)
+
+Prior knowledge in CSV form and MATLAB files older than v7.3 need no extra. If an extra is
+missing, the function that needs it raises an ``ImportError`` naming the one to install.
+The HSVD path never needs ``[hlsvd]``: without it pyAMARES uses its own bundled pure-Python
+implementation, which is what every numpy 2 install has used all along.
 
 See the `Installation Guide <https://pyamares.readthedocs.io/en/latest/install.html>`_ for detailed information.
 

@@ -313,6 +313,40 @@ def test_bare_import_keeps_heavy_modules_unloaded():
     )
 
 
+def test_headless_fft_params_paths_import_no_nmrglue():
+    """Pin *where* the nmrglue import sits inside ``fft_params`` (D17).
+
+    It is deliberately below the ``return_mat`` / ``fid=True`` early returns,
+    because those are the two branches a headless fit takes — kernel/lmfit.py and
+    kernel/PriorKnowledge.py only ever call it that way. A comment says so; this
+    test is what enforces it, in a child process so a stray nmrglue loaded by some
+    other test cannot mask the regression.
+    """
+    code = (
+        "import sys\n"
+        "sys.path = " + repr(list(sys.path)) + "\n"
+        "import numpy as np\n"
+        "from lmfit import Parameters\n"
+        "from pyAMARES.kernel.fid import fft_params\n"
+        "params = Parameters()\n"
+        "for name, value in (('ak_1', 1.0), ('freq_1', 10.0), ('dk_1', 5.0),\n"
+        "                    ('phi_1', 0.0), ('g_1', 0.0)):\n"
+        "    params.add(name, value=value)\n"
+        "timeaxis = np.arange(16) / 1000.0\n"
+        "assert fft_params(timeaxis, params, fid=True) is not None\n"
+        "assert fft_params(timeaxis, params, return_mat=True) is not None\n"
+        "print('nmrglue' in sys.modules)\n"
+    )
+    proc = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+    assert proc.returncode == 0, "headless fft_params call failed:\n" + proc.stderr
+    assert proc.stdout.strip() == "False", (
+        "fft_params' fid=True / return_mat=True branches imported nmrglue — the "
+        "import moved above the early returns, putting a plotting-era dependency "
+        "back on the critical path of every headless fit (DIVERGENCE.md D17). "
+        "Child stdout:\n" + proc.stdout
+    )
+
+
 #: Third-party distributions ``pyAMARES/**`` may import at module scope. Anything
 #: else belongs inside the function that uses it (D17). numpy/scipy/pandas/lmfit
 #: are the numeric core the package cannot work without; jinja2 is probed at
@@ -330,37 +364,27 @@ MODULE_LEVEL_EXCEPTIONS = {
     os.path.join("util", "crlb.py"): frozenset({"sympy"}),
 }
 
-#: ``pyAMARES/script/`` is out of scope: nothing in the package imports it (the
-#: entry points are console scripts), and amaresfit_gui.py carries streamlit,
-#: requests and matplotlib at module scope by design.
+#: Top-level subpackages of ``pyAMARES/`` the scan skips, matched against the
+#: first path component only — a ``script`` directory nested anywhere else is
+#: still scanned. ``pyAMARES/script/`` is out of scope because nothing in the
+#: package imports it (the entry points are console scripts), and
+#: amaresfit_gui.py carries streamlit, requests and matplotlib at module scope by
+#: design.
 UNSCANNED_SUBPACKAGES = ("script",)
-
-try:  # Python 3.10+
-    STDLIB_MODULE_NAMES = frozenset(sys.stdlib_module_names)
-except AttributeError:  # pragma: no cover - Python 3.8/3.9
-    STDLIB_MODULE_NAMES = frozenset(
-        {
-            "__future__", "abc", "argparse", "base64", "collections", "concurrent",
-            "contextlib", "copy", "csv", "datetime", "functools", "glob", "hashlib",
-            "importlib", "inspect", "io", "itertools", "json", "logging", "math",
-            "multiprocessing", "os", "pathlib", "pickle", "random", "re", "shutil",
-            "string", "struct", "subprocess", "sys", "tempfile", "textwrap",
-            "threading", "time", "traceback", "typing", "uuid", "warnings",
-        }
-    )  # fmt: skip
 
 
 def _module_level_imports(tree):
     """Yield ``(top_level_name, lineno)`` for every absolute import at module scope.
 
-    Module scope includes the bodies of module-level ``if``/``try`` blocks — that
-    is where both documented exceptions live — but never a function or class body,
-    which is exactly where D17 put the heavy imports.
+    Module scope is everything that runs on import: the module body, the bodies of
+    module-level ``if``/``try`` blocks — where both documented exceptions live —
+    and class bodies, which execute at class-creation time, i.e. at import. Only
+    function bodies are skipped, which is exactly where D17 put the heavy imports.
     """
     pending = list(tree.body)
     while pending:
         node = pending.pop()
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             continue
         if isinstance(node, ast.Import):
             for alias in node.names:
@@ -372,6 +396,13 @@ def _module_level_imports(tree):
             pending.extend(ast.iter_child_nodes(node))
 
 
+@pytest.mark.skipif(
+    sys.version_info < (3, 10),
+    reason=(
+        "needs sys.stdlib_module_names (3.10+); the scan reads source, not the "
+        "running interpreter, so the 3.10+ legs cover every supported Python"
+    ),
+)
 def test_no_undocumented_module_level_third_party_imports():
     """The forward-looking half of the D17 guard.
 
@@ -382,13 +413,18 @@ def test_no_undocumented_module_level_third_party_imports():
     """
     import pyAMARES
 
+    stdlib_module_names = frozenset(sys.stdlib_module_names)
     package_root = os.path.dirname(os.path.abspath(pyAMARES.__file__))
     offenders = []
     for directory, subdirectories, filenames in os.walk(package_root):
+        # Prune by position, not by name: only `pyAMARES/script/` is exempt, not
+        # any directory that happens to be called "script".
+        depth = os.path.relpath(directory, package_root)
         subdirectories[:] = [
             d
             for d in subdirectories
-            if d not in UNSCANNED_SUBPACKAGES and d != "__pycache__"
+            if d != "__pycache__"
+            and not (depth == os.curdir and d in UNSCANNED_SUBPACKAGES)
         ]
         for filename in sorted(filenames):
             if not filename.endswith(".py"):
@@ -401,7 +437,7 @@ def test_no_undocumented_module_level_third_party_imports():
             with open(path, encoding="utf-8") as handle:
                 tree = ast.parse(handle.read(), filename=path)
             for name, lineno in _module_level_imports(tree):
-                if name in STDLIB_MODULE_NAMES or name == "pyAMARES":
+                if name in stdlib_module_names or name == "pyAMARES":
                     continue
                 if name not in allowed:
                     offenders.append("{}:{}: {}".format(relative, lineno, name))
@@ -413,3 +449,163 @@ def test_no_undocumented_module_level_third_party_imports():
         "genuinely has to happen at import time — add the file to "
         "MODULE_LEVEL_EXCEPTIONS with a reason and a DIVERGENCE.md entry."
     )
+
+
+# --------------------------------------------------------------------------------
+# Optional dependencies: the message says which extra to install (D18)
+# --------------------------------------------------------------------------------
+#
+# mat73, openpyxl and xlrd left install_requires in 0.5.0. Each import site that
+# lost its guaranteed dependency has to fail with a message naming the extra that
+# restores it. These tests simulate the missing dependency rather than requiring
+# it to be absent, so they assert the same thing on every stack — bare install or
+# ``[jupyter]``.
+
+
+def test_v73_mat_read_without_mat73_names_the_matlab_extra(monkeypatch, tmp_path):
+    """``readmrs`` on a v7.3 .mat, with mat73 unimportable."""
+    from pyAMARES.fileio import readmat
+
+    # ``None`` in sys.modules makes the import machinery raise ImportError, which
+    # is what a genuinely absent mat73 does. monkeypatch removes the key again.
+    monkeypatch.setitem(sys.modules, "mat73", None)
+    monkeypatch.setattr(readmat, "is_mat_file_v7_3", lambda filename: True)
+
+    with pytest.raises(ImportError) as excinfo:
+        readmat.readmrs(str(tmp_path / "v73.mat"))
+
+    assert "pyamares-xmris[matlab]" in str(excinfo.value)
+    assert isinstance(excinfo.value.__cause__, ModuleNotFoundError)
+
+
+def test_read_fidall_without_mat73_names_the_matlab_extra(monkeypatch, tmp_path):
+    """The second v7.3 branch, in ``read_fidall``."""
+    from pyAMARES.fileio import readfidall
+
+    monkeypatch.setitem(sys.modules, "mat73", None)
+    monkeypatch.setattr(readfidall, "is_mat_file_v7_3", lambda filename: True)
+
+    with pytest.raises(ImportError) as excinfo:
+        readfidall.read_fidall(str(tmp_path / "v73.mat"))
+
+    assert "pyamares-xmris[matlab]" in str(excinfo.value)
+    assert isinstance(excinfo.value.__cause__, ModuleNotFoundError)
+
+
+def test_broken_mat73_keeps_its_own_error(monkeypatch, tmp_path):
+    """An installed-but-broken mat73 must not be reported as a missing extra.
+
+    The guard catches ModuleNotFoundError only, so an h5py ABI mismatch — an
+    ImportError that is *not* a ModuleNotFoundError — reaches the caller with the
+    message that says what is actually wrong.
+    """
+    import builtins
+
+    from pyAMARES.fileio import readmat
+
+    real_import = builtins.__import__
+
+    def broken_mat73_import(name, *args, **kwargs):
+        if name == "mat73":
+            raise ImportError("libhdf5.so.310: cannot open shared object file")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", broken_mat73_import)
+    monkeypatch.setattr(readmat, "is_mat_file_v7_3", lambda filename: True)
+
+    with pytest.raises(ImportError) as excinfo:
+        readmat.readmrs(str(tmp_path / "v73.mat"))
+
+    assert "libhdf5" in str(excinfo.value)
+    assert "pyamares-xmris[matlab]" not in str(excinfo.value)
+
+
+def test_excel_prior_without_an_engine_names_the_excel_extra(monkeypatch, tmp_path):
+    """``generateparameter`` on an .xlsx prior, with no pandas Excel engine.
+
+    pandas itself raises ``ImportError("Missing optional dependency 'openpyxl'")``
+    in that situation; the wrapper has to turn it into an instruction.
+    """
+    import pandas as pd
+
+    from pyAMARES.kernel import PriorKnowledge
+
+    def missing_engine(*args, **kwargs):
+        raise ImportError(
+            "Missing optional dependency 'openpyxl'. Use pip or conda to install "
+            "openpyxl."
+        )
+
+    monkeypatch.setattr(pd, "read_excel", missing_engine)
+
+    with pytest.raises(ImportError) as excinfo:
+        PriorKnowledge.generateparameter(str(tmp_path / "prior.xlsx"))
+
+    message = str(excinfo.value)
+    assert "pyamares-xmris[excel]" in message
+    assert "CSV" in message  # the no-extra way out
+    assert isinstance(excinfo.value.__cause__, ImportError)
+
+
+#: The logger ``run_parallel_fitting_with_progress`` warns through.
+PROGRESS_LOGGER = "pyAMARES.util.multiprocessing"
+
+
+def test_progress_bar_falls_back_to_text_without_ipywidgets(monkeypatch, caplog):
+    """The parallel fit must not die because ipywidgets is behind an extra.
+
+    ``tqdm.notebook`` *imports* fine without ipywidgets and only raises
+    ``ImportError("IProgress not found...")`` when a bar is constructed — which
+    in ``run_parallel_fitting_with_progress`` happens after the whole process pool
+    has been filled. Simulating it through tqdm's own ``IProgress`` flag means
+    this asserts the same thing whether or not ipywidgets is installed here.
+    """
+    import tqdm
+    import tqdm.notebook
+
+    from pyAMARES.util.multiprocessing import _select_tqdm
+
+    monkeypatch.setattr(tqdm.notebook, "IProgress", None, raising=False)
+
+    # Name the logger: regression_cases sets every pyAMARES logger to ERROR, and
+    # caplog.at_level() without a name only moves the root logger.
+    with caplog.at_level("WARNING", logger=PROGRESS_LOGGER):
+        selected = _select_tqdm(notebook=True)
+
+    assert selected is tqdm.tqdm
+    assert "pyamares-xmris[jupyter]" in caplog.text
+
+
+def test_progress_bar_falls_back_when_tqdm_notebook_is_absent(monkeypatch, caplog):
+    """The same fallback, for a tqdm too old to carry the submodule."""
+    import tqdm
+
+    from pyAMARES.util.multiprocessing import _select_tqdm
+
+    monkeypatch.setitem(sys.modules, "tqdm.notebook", None)
+
+    with caplog.at_level("WARNING", logger=PROGRESS_LOGGER):
+        selected = _select_tqdm(notebook=True)
+
+    assert selected is tqdm.tqdm
+    assert "pyamares-xmris[jupyter]" in caplog.text
+
+
+def test_progress_bar_uses_the_notebook_class_when_ipywidgets_is_usable():
+    """The fallback must not fire when the widget bar would work."""
+    import tqdm.notebook
+
+    from pyAMARES.util.multiprocessing import _select_tqdm
+
+    if getattr(tqdm.notebook, "IProgress", False) is None:
+        pytest.skip("ipywidgets is not installed here, so there is nothing to pick")
+
+    assert _select_tqdm(notebook=True) is tqdm.notebook.tqdm
+
+
+def test_progress_bar_honours_notebook_false():
+    import tqdm
+
+    from pyAMARES.util.multiprocessing import _select_tqdm
+
+    assert _select_tqdm(notebook=False) is tqdm.tqdm

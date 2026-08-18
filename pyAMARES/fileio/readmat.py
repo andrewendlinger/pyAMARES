@@ -57,7 +57,16 @@ def readmrs(filename):
         data = np.load(filename)
     elif filename.endswith("mat"):
         if is_mat_file_v7_3(filename):
-            import mat73
+            try:
+                import mat73
+            except ModuleNotFoundError as exc:
+                # Only an *absent* mat73 gets the install instruction (D18) --
+                # an installed-but-broken one (e.g. an h5py ABI mismatch) raises
+                # ImportError and must keep its own message.
+                raise ImportError(
+                    "Reading MATLAB v7.3 .mat files requires mat73. "
+                    "Install it with: pip install 'pyamares-xmris[matlab]'"
+                ) from exc
 
             # print("Try to load Matlab V7.3 mat file with the var saved as fid or data")
             logger.debug(

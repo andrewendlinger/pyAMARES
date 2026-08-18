@@ -32,7 +32,10 @@ jobs:
           python -m pip install --upgrade pip setuptools wheel
           python -m pip install pytest nbval ipykernel
           python -m ipykernel install --user
-          python -m pip install -e .
+          # The notebooks are the interactive workflow, so they need the extra
+          # that D18 demoted them behind: step1_download.ipynb uses requests, and
+          # the display path wants the Jupyter stack.
+          python -m pip install -e ".[jupyter]"
 
       - name: Update notebook kernels
         run: |
