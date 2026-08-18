@@ -71,7 +71,24 @@ def platform_goldens_dir() -> str:
 #: can ever be the first half of a :func:`platform_goldens_key`, so only these
 #: name a platform golden set.
 PLATFORM_PREFIXES = frozenset(
-    {"linux", "darwin", "win32", "cygwin", "freebsd", "aix", "sunos", "emscripten"}
+    {
+        # Documented by CPython's sys.platform table.
+        "linux",
+        "darwin",
+        "win32",
+        "cygwin",
+        "aix",
+        "emscripten",
+        "wasi",
+        "android",
+        "ios",
+        # Not in that table but real, and reached through the `sys.platform ==
+        # <uname>.lower()` fallback CPython uses for anything it does not special-case.
+        "freebsd",
+        "openbsd",
+        "netbsd",
+        "sunos",
+    }
 )
 
 #: The machine half — ``platform.machine()`` — is free-form vendor text, so it is
@@ -143,8 +160,9 @@ SYNTHETIC_GROUND_TRUTH = pd.DataFrame(
 HSVD_NUM_COMPONENTS = 8
 
 # --- Case D: the vendored HSVD backend, frozen ------------------------------------
-#: Name of the golden that freezes :func:`run_hsvd_vendored_backend_case`. It is not
-#: in :data:`GOLDEN_CASES` because its payload is not a ``result_multiplets`` table.
+#: Name of the golden that freezes :func:`run_hsvd_vendored_backend_case`. Its
+#: registry entry carries :data:`KIND_HSVD_COMPONENTS`, not the fit kind: the
+#: payload is a decomposition, not a ``result_multiplets`` table.
 HSVD_VENDORED_CASE = "hsvd_vendored_backend"
 
 #: The per-component fields frozen by that golden, in the order the rows carry them.
@@ -548,14 +566,6 @@ def case_names_of_kind(kind: str):
     """
     return [n for n, case in GOLDEN_CASE_REGISTRY.items() if case.kind == kind]
 
-
-#: The fit cases only — name -> runner returning the FID object whose
-#: ``result_multiplets`` gets frozen. Derived, never edited: the tests that are
-#: specific to that payload shape parametrize over it.
-GOLDEN_CASES = {
-    name: GOLDEN_CASE_REGISTRY[name].runner
-    for name in case_names_of_kind(KIND_RESULT_MULTIPLETS)
-}
 
 #: Every golden name, whatever the payload shape. ``tests/goldens/`` and each of
 #: its platform subdirectories are policed against this set, and

@@ -279,7 +279,9 @@ def golden_structure_problems(case_name: str, label: str, golden: dict) -> list:
     )
 
 
-@pytest.mark.parametrize("case_name", sorted(rc.GOLDEN_CASES))
+@pytest.mark.parametrize(
+    "case_name", sorted(rc.case_names_of_kind(rc.KIND_RESULT_MULTIPLETS))
+)
 def test_golden_result_multiplets(case_name):
     """Every golden cell of ``result_multiplets`` still matches the frozen value.
 
@@ -288,16 +290,19 @@ def test_golden_result_multiplets(case_name):
     """
     golden = load_golden(case_name)
     source = golden["_source_path"]
-    df = rc.golden_case_result(case_name).result_multiplets
 
-    # Guard the golden against the *live* constants, not against its own copies of
-    # them (both sides of a JSON-vs-JSON comparison were written by the same
-    # capture run, so it can never fail). If someone edits GOLDEN_COLUMNS or
-    # RESULT_MULTIPLETS_COLUMNS without re-capturing, this catches it — as does
-    # the same validator run over every platform override, on every platform.
+    # Structure first, before the fit runs. Guard the golden against the *live*
+    # constants, not against its own copies of them (both sides of a JSON-vs-JSON
+    # comparison were written by the same capture run, so it can never fail). If
+    # someone edits GOLDEN_COLUMNS or RESULT_MULTIPLETS_COLUMNS without
+    # re-capturing, this catches it — as does the same validator run over every
+    # platform override, on every platform. Ordering matters: a golden that froze
+    # an sd column is a fact about the file, so it must be reportable even when
+    # the fit below is what is broken.
     problems = golden_structure_problems(case_name, source, golden)
     assert not problems, "malformed golden:\n" + "\n".join(problems)
 
+    df = rc.golden_case_result(case_name).result_multiplets
     assert [str(x) for x in df.index] == golden["index"], (
         f"{source}: the metabolite row index changed.\n"
         f"  expected: {golden['index']}\n"
@@ -395,7 +400,10 @@ def test_platform_golden_dirs_are_named_and_populated_correctly():
         if not rc.looks_like_platform_dir(entry):
             problems.append(
                 f"  {entry}/: not a '<sys.platform>-<machine>' directory name "
-                f"(this platform's key is {rc.platform_goldens_key()!r})"
+                f"(this platform's key is {rc.platform_goldens_key()!r}; the "
+                f"first component must be one of "
+                f"regression_cases.PLATFORM_PREFIXES, "
+                f"{', '.join(sorted(rc.PLATFORM_PREFIXES))})"
             )
             continue
         names = sorted(n for n in os.listdir(path) if not n.startswith("."))
@@ -760,12 +768,14 @@ def test_hsvd_components_match_golden(case_name):
     """
     golden = load_golden(case_name)
     source = golden["_source_path"]
-    result = rc.golden_case_result(case_name)
 
-    # Against the live constants, never against the golden's copies of them.
+    # Structure first, before the decomposition runs — against the live constants,
+    # never against the golden's copies of them. A schema violation is a fact about
+    # the file and stays reportable even when the runner is what is broken.
     problems = golden_structure_problems(case_name, source, golden)
     assert not problems, "malformed golden:\n" + "\n".join(problems)
 
+    result = rc.golden_case_result(case_name)
     assert result["nsv_found"] == golden["nsv_found"], (
         f"{source}: the HSVD backend found {result['nsv_found']} singular "
         f"value(s), the golden froze {golden['nsv_found']}"

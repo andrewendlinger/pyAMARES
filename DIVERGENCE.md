@@ -869,9 +869,12 @@ Not commitments. Recorded so the cost is known when the question comes up.
                util/crlb.py is touched: the ill-conditioning is upstream's
                numerics, and "improve" here means changing fitted uncertainties,
                which is a domain decision no packaging release should make.
-    Guarded:   structurally only, never golden-compared, and
-               test_goldens_never_freeze_the_sd_columns fails the suite if a
-               re-capture quietly starts freezing them. What is asserted:
+    Guarded:   structurally only, never golden-compared, and the goldens'
+               structural validator (_fit_golden_problems, run by
+               test_golden_result_multiplets over each resolved golden and by
+               test_platform_golden_dirs_are_named_and_populated_correctly over
+               every platform override) fails the suite if a re-capture quietly
+               starts freezing them. What is asserted:
                  - every value finite, strictly positive, and sd < amplitude
                  - the *measured* proportionality sd = k*(CRLB/100)*|value| with
                    one fit-wide k (k is not 1 — report_amares fills sd from

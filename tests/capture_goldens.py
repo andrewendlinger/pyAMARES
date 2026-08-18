@@ -113,10 +113,16 @@ def capture_meta() -> dict:
 def _tolerances(case, default: dict) -> dict:
     """The case's own tolerance block if it declares one, else the kind's default.
 
+    ``None`` is the "use the default" signal, per :class:`GoldenCase`'s contract —
+    tested with ``is not None`` rather than for truthiness, so a case that
+    deliberately declares an empty block gets the empty block it asked for instead
+    of silently inheriting the default.
+
     Deep-copied through JSON either way, so a payload can never alias — and later
     mutate — the live constant it was built from.
     """
-    return json.loads(json.dumps(case.tolerances if case.tolerances else default))
+    block = case.tolerances if case.tolerances is not None else default
+    return json.loads(json.dumps(block))
 
 
 def golden_payload(case_name: str, result_multiplets, case) -> dict:
@@ -131,7 +137,7 @@ def golden_payload(case_name: str, result_multiplets, case) -> dict:
     }
     meta = capture_meta()
     meta["case"] = case_name
-    return {
+    payload = {
         "meta": meta,
         "index": [str(name) for name in df.index],
         "columns_exact_order": [str(c) for c in df.columns],
@@ -140,6 +146,13 @@ def golden_payload(case_name: str, result_multiplets, case) -> dict:
         "values": values,
         "tolerances": _tolerances(case, DEFAULT_TOLERANCES),
     }
+    # A fit case may carry a comment too — the field is on GoldenCase, not on one
+    # kind's builder, so honouring it here is what makes it mean the same thing
+    # everywhere. Written only when there is one, so the three canonical fit
+    # goldens (which declare none) keep exactly the keys they were frozen with.
+    if case.comment:
+        payload["comment"] = case.comment
+    return payload
 
 
 def hsvd_golden_payload(case_name: str, result: dict, case) -> dict:
@@ -152,20 +165,15 @@ def hsvd_golden_payload(case_name: str, result: dict, case) -> dict:
 
     Every number that describes *this dataset* — the tolerance floors, the
     narrative — comes off the registry entry, so the builder stays generic over
-    the kind. There is no default tolerance block for it: an HSVD case must
-    declare its own measured tolerances, because there is no meaningful figure to
-    fall back to.
+    the kind. Both are read straight off the case with no fallback: there is no
+    default tolerance block that would mean anything for a decomposition, and no
+    default narrative either. ``PayloadHandler.requires`` is what enforces their
+    presence, before the case is ever run.
     """
     components = result["components"]
     missing = [f for f in rc.HSVD_COMPONENT_FIELDS if f not in components.columns]
     if missing:
         raise RuntimeError(f"{case_name}: HSVD components lost fields {missing!r}")
-    if not case.tolerances:
-        raise RuntimeError(
-            f"{case_name}: an {rc.KIND_HSVD_COMPONENTS} case must declare its own "
-            "measured tolerances on its registry entry — there is no default that "
-            "would mean anything for a decomposition."
-        )
     meta = capture_meta()
     meta["case"] = case_name
     return {
@@ -183,7 +191,9 @@ def hsvd_golden_payload(case_name: str, result: dict, case) -> dict:
             for row in components.index
         ],
         "top_singular_values": [float(x) for x in result["top_singular_values"]],
-        "tolerances": _tolerances(case, {}),
+        # Deep-copied so the payload cannot alias the live registry constant; no
+        # default to fall back to, hence no _tolerances() call.
+        "tolerances": json.loads(json.dumps(case.tolerances)),
         "comment": case.comment,
     }
 
@@ -203,6 +213,11 @@ class PayloadHandler(NamedTuple):
     #: shape back out of the thing you just built is a guess, and it silently
     #: mislabels the first kind that happens to share a key name.
     describe: Callable
+    #: :class:`regression_cases.GoldenCase` fields this kind cannot be captured
+    #: without. Checked in :func:`capture_case` *before* the case is run, so a
+    #: registry entry that is missing one costs a clear error rather than a long
+    #: fit followed by a file the test suite then rejects.
+    requires: tuple = ()
 
 
 #: Payload kind -> handler, the one thing ``capture_goldens.py`` adds to the case
@@ -212,9 +227,14 @@ PAYLOAD_HANDLERS = {
     rc.KIND_RESULT_MULTIPLETS: PayloadHandler(
         _result_multiplets_payload, lambda payload: f"{len(payload['index'])} rows"
     ),
+    # Both are hard requirements at *test* time — `_hsvd_golden_problems` rejects a
+    # golden of this kind that carries no comment, and the comparer needs a
+    # tolerance block — so they are hard requirements at capture time too. They
+    # were not, and capture could happily produce a file the suite would fail on.
     rc.KIND_HSVD_COMPONENTS: PayloadHandler(
         hsvd_golden_payload,
         lambda payload: f"{len(payload['components'])} components",
+        requires=("tolerances", "comment"),
     ),
 }
 
@@ -229,6 +249,13 @@ def capture_case(case_name: str):
             f"{case_name}: payload kind {case.kind!r} has no handler in "
             f"capture_goldens.PAYLOAD_HANDLERS (known: {sorted(PAYLOAD_HANDLERS)})"
         ) from None
+    absent = [field for field in handler.requires if not getattr(case, field)]
+    if absent:
+        raise RuntimeError(
+            f"{case_name}: a {case.kind!r} case must declare {absent} on its "
+            "registry entry in regression_cases.GOLDEN_CASE_REGISTRY — there is no "
+            "default for it that would mean anything for this payload kind."
+        )
     payload = handler.build(case_name, case.runner(), case)
     return payload, handler.describe(payload)
 
@@ -295,7 +322,11 @@ def main(argv=None) -> int:
             f"--write {args.write!r} targets the platform golden set {basename!r}, "
             f"but this host is {rc.platform_goldens_key()!r}. Capture a platform "
             "set on its own platform (see .github/workflows/capture-goldens.yml), "
-            "or write to a directory that is not named after a platform."
+            "or write to a directory that is not named after a platform. A name "
+            "counts as a platform set when its first component is one of "
+            f"regression_cases.PLATFORM_PREFIXES "
+            f"({', '.join(sorted(rc.PLATFORM_PREFIXES))}) — if a real platform is "
+            "missing from that set, add it there rather than working around this."
         )
 
     os.makedirs(outdir, exist_ok=True)
