@@ -16,8 +16,10 @@ from __future__ import annotations
 
 import os
 
-# pyAMARES imports matplotlib.pyplot eagerly (kernel/fid.py, libs/MPFIR.py). Pin a
-# non-interactive backend before that happens so the runners work headless.
+# Since D17, `import pyAMARES` no longer pulls in matplotlib.pyplot -- but the fits
+# themselves still can (any ifplot/preview path, and report_amares -> util/crlb.py),
+# and pyplot picks its backend the first time it is imported. Pin a non-interactive
+# one up front so the runners work headless whenever that happens.
 os.environ.setdefault("MPLBACKEND", "Agg")
 
 from copy import deepcopy  # noqa: E402

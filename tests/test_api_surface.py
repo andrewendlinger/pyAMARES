@@ -5,16 +5,20 @@ Run them with::
     pytest tests/test_regression.py tests/test_api_surface.py -o addopts=""
 
 Nothing numeric is asserted here — only shape: column labels, the row index,
-``FIDobj`` attribute names, call signatures, import paths, and the copy/pickle
-contract the joblib (loky) workers depend on. Renaming anything pinned here breaks
-xmris at import or attribute-access time, so it needs a coordinated release.
+``FIDobj`` attribute names, call signatures, import paths, the copy/pickle
+contract the joblib (loky) workers depend on, and the import graph of a bare
+``import pyAMARES``. Renaming anything pinned here breaks xmris at import or
+attribute-access time, so it needs a coordinated release.
 """
 
 from __future__ import annotations
 
+import ast
 import copy
 import inspect
 import pickle
+import subprocess
+import sys
 
 import pytest
 
@@ -251,3 +255,50 @@ def test_unstripped_fitted_object_does_not_pickle(fitted_example):
     """Document the reason the strip exists, so nobody removes it as dead code."""
     with pytest.raises((AttributeError, TypeError, pickle.PicklingError)):
         pickle.dumps(copy.deepcopy(fitted_example))
+
+
+# --------------------------------------------------------------------------------
+# The import graph: bare `import pyAMARES` stays lazy (D17)
+# --------------------------------------------------------------------------------
+
+#: Modules that must NOT load on bare `import pyAMARES`. Matched as the exact
+#: name or any submodule of it.
+#: Deliberate absences:
+#: - `matplotlib` (bare): lmfit.model does a module-scope `try: import
+#:   matplotlib` (for _HAS_MATPLOTLIB), so the bare package always loads; the
+#:   expensive half is matplotlib.pyplot, and that is what is pinned.
+#: - `hlsvdpro`: under numpy<2 with an importable hlsvdpro, util/hsvd.py
+#:   legitimately binds it at import time (rule pinned by
+#:   test_hsvd_backend_selection).
+#: - `jinja2`: util/report.py probes it at import time by design (core dep).
+FORBIDDEN_ON_BARE_IMPORT = [
+    "matplotlib.pyplot",
+    "nmrglue",
+    "mat73",
+    "sympy",
+    "IPython",
+    "tqdm",
+    "requests",
+    "xlrd",
+    "openpyxl",
+    "nibabel",
+]
+
+
+def test_bare_import_keeps_heavy_modules_unloaded():
+    code = (
+        "import sys\n"
+        "import pyAMARES\n"
+        "names = " + repr(FORBIDDEN_ON_BARE_IMPORT) + "\n"
+        "loaded = [n for n in names\n"
+        "          if n in sys.modules\n"
+        "          or any(m.startswith(n + '.') for m in sys.modules)]\n"
+        "print(repr(loaded))\n"
+    )
+    proc = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+    assert proc.returncode == 0, "bare import failed:\n" + proc.stderr
+    loaded = ast.literal_eval(proc.stdout.strip())
+    assert not loaded, (
+        "bare `import pyAMARES` loaded {} (see DIVERGENCE.md D17); "
+        "a module-level heavy import crept back in".format(loaded)
+    )
