@@ -44,8 +44,14 @@ packaging metadata and, from 0.4.0 on, targeted source fixes.
   (`-o addopts=""` is required — `pytest.ini` injects `--nbval-lax`, which errors in minimal
   envs without nbval).
 - **Goldens under `tests/goldens/` are frozen** — captured on the 0.3.33 stack (py3.12,
-  numpy 1.26.4, pandas 2.1.4). Never regenerate them without an explicit decision; tolerance
-  adjustments are data-only edits inside the golden JSON, with a comment.
+  numpy 1.26.4, pandas 2.1.4) on darwin-arm64. Never regenerate them without an explicit
+  decision; tolerance adjustments are data-only edits inside the golden JSON, with a comment.
+  The corpus is a moving count — never quote a number for it, just run it.
+- **Platform goldens**: the canonical files sitting directly in `tests/goldens/` are that
+  frozen darwin-arm64 reference and serve every platform; a
+  `tests/goldens/<sys.platform>-<machine>/` directory (e.g. `linux-x86_64/`) overrides them
+  **per file** where a set has been captured — via `.github/workflows/capture-goldens.yml`,
+  whose artifact the maintainer reviews and commits by hand, never automatically.
 - Notebook smoke tests: `pytest --nbval-lax --current-env tests/` (execution-only, no output
   comparison; needs nbval + ipykernel).
 
