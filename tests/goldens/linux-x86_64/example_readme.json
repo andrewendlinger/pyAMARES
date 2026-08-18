@@ -230,15 +230,13 @@
     }
   },
   "tolerances": {
-    "default_rtol": 0.0001,
+    "default_rtol": 0.005,
     "default_atol": 0.0,
     "per_column": {
       "chem shift(ppm)": {
-        "atol": 1e-06
-      },
-      "CRLB(cs%) ": {
-        "rtol": 0.001
+        "atol": 5e-05
       }
-    }
+    },
+    "comment": "default_rtol loosened 1e-4 -> 5e-3 on 2026-08-18, measured on this platform's own CI legs: pandas 2.2.x (numpy 1.26.4) drifts 41 cells beyond 1e-4 against this pandas-2.1.4 capture (worst 2.52e-3 LW(Hz)/UDPG, amplitude/UDPG 1.31e-3, global phase 1.04e-3) - the same soft-mode pattern this ill-conditioned 16-metabolite real-data case shows under any stack perturbation. The other linux legs hold tight (old-stack exact by construction; numpy 2.5.2/pandas 3.0.5 and pandas 2.3 measured <= 1e-4), but this file must pass on every supported stack of its platform. The chem shift atol widens proportionally (1e-6 -> 5e-5) and the CRLB(cs%) override (1e-3, looser than the old default) is dropped as covered. The tight 1e-4 signal on linux is carried by example_xmris_shape, synthetic_noise1_gfree and hsvd_vendored_backend, which hold it on every leg."
   }
 }
