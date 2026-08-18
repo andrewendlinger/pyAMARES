@@ -1,4 +1,3 @@
-import mat73
 import numpy as np
 from scipy import io
 
@@ -58,6 +57,8 @@ def readmrs(filename):
         data = np.load(filename)
     elif filename.endswith("mat"):
         if is_mat_file_v7_3(filename):
+            import mat73
+
             # print("Try to load Matlab V7.3 mat file with the var saved as fid or data")
             logger.debug(
                 "Try to load Matlab V7.3 mat file with the var saved as fid or data"

@@ -5,16 +5,21 @@ Run them with::
     pytest tests/test_regression.py tests/test_api_surface.py -o addopts=""
 
 Nothing numeric is asserted here — only shape: column labels, the row index,
-``FIDobj`` attribute names, call signatures, import paths, and the copy/pickle
-contract the joblib (loky) workers depend on. Renaming anything pinned here breaks
-xmris at import or attribute-access time, so it needs a coordinated release.
+``FIDobj`` attribute names, call signatures, import paths, the copy/pickle
+contract the joblib (loky) workers depend on, and the import graph of a bare
+``import pyAMARES``. Renaming anything pinned here breaks xmris at import or
+attribute-access time, so it needs a coordinated release.
 """
 
 from __future__ import annotations
 
+import ast
 import copy
 import inspect
+import os
 import pickle
+import subprocess
+import sys
 
 import pytest
 
@@ -251,3 +256,160 @@ def test_unstripped_fitted_object_does_not_pickle(fitted_example):
     """Document the reason the strip exists, so nobody removes it as dead code."""
     with pytest.raises((AttributeError, TypeError, pickle.PicklingError)):
         pickle.dumps(copy.deepcopy(fitted_example))
+
+
+# --------------------------------------------------------------------------------
+# The import graph: bare `import pyAMARES` stays lazy (D17)
+# --------------------------------------------------------------------------------
+
+#: Modules that must NOT load on bare `import pyAMARES`. Matched as the exact
+#: name or any submodule of it.
+#: Deliberate absences:
+#: - `matplotlib` (bare): lmfit.model does a module-scope `try: import
+#:   matplotlib` (for _HAS_MATPLOTLIB), so the bare package always loads; the
+#:   expensive half is matplotlib.pyplot, and that is what is pinned.
+#: - `hlsvdpro`: under numpy<2 with an importable hlsvdpro, util/hsvd.py
+#:   legitimately binds it at import time (rule pinned by
+#:   test_hsvd_backend_selection).
+#: - `jinja2`: util/report.py probes it at import time by design (core dep).
+FORBIDDEN_ON_BARE_IMPORT = [
+    "matplotlib.pyplot",
+    "nmrglue",
+    "mat73",
+    "sympy",
+    "IPython",
+    "tqdm",
+    "requests",
+    "xlrd",
+    "openpyxl",
+    "nibabel",
+]
+
+
+def test_bare_import_keeps_heavy_modules_unloaded():
+    """Import pyAMARES in a child process and see what came along with it.
+
+    The child is handed this process' ``sys.path`` verbatim, so it resolves the
+    same pyAMARES pytest resolved rather than whatever the working directory
+    happens to offer. It prints one offending module name per line, so a failure
+    shows the names — and any stray import-time chatter — as evidence rather than
+    as a parse error.
+    """
+    code = (
+        "import sys\n"
+        "sys.path = " + repr(list(sys.path)) + "\n"
+        "import pyAMARES\n"
+        "names = " + repr(FORBIDDEN_ON_BARE_IMPORT) + "\n"
+        "for n in names:\n"
+        "    if n in sys.modules or any(m.startswith(n + '.') for m in sys.modules):\n"
+        "        print(n)\n"
+    )
+    proc = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+    assert proc.returncode == 0, "bare import failed:\n" + proc.stderr
+    assert not proc.stdout.strip(), (
+        "bare `import pyAMARES` loaded modules it must not (see DIVERGENCE.md "
+        "D17) — a module-level heavy import crept back in. Child stdout:\n"
+        + proc.stdout
+    )
+
+
+#: Third-party distributions ``pyAMARES/**`` may import at module scope. Anything
+#: else belongs inside the function that uses it (D17). numpy/scipy/pandas/lmfit
+#: are the numeric core the package cannot work without; jinja2 is probed at
+#: import time by util/report.py to set ``if_style``.
+ALLOWED_MODULE_LEVEL = frozenset({"numpy", "scipy", "pandas", "lmfit", "jinja2"})
+
+#: Documented per-file exceptions, keyed by path relative to the package root:
+#: - ``util/hsvd.py``: *which* HSVD backend the module binds is an import-time
+#:   rule, and that rule is what ``test_hsvd_backend_selection`` pins.
+#: - ``util/crlb.py``: sympy is the CRLB algebra itself (``create_pmatrix``), and
+#:   the module is reached only through util/report.py's delayed import — i.e. at
+#:   first-report time, never at ``import pyAMARES``.
+MODULE_LEVEL_EXCEPTIONS = {
+    os.path.join("util", "hsvd.py"): frozenset({"hlsvdpro"}),
+    os.path.join("util", "crlb.py"): frozenset({"sympy"}),
+}
+
+#: ``pyAMARES/script/`` is out of scope: nothing in the package imports it (the
+#: entry points are console scripts), and amaresfit_gui.py carries streamlit,
+#: requests and matplotlib at module scope by design.
+UNSCANNED_SUBPACKAGES = ("script",)
+
+try:  # Python 3.10+
+    STDLIB_MODULE_NAMES = frozenset(sys.stdlib_module_names)
+except AttributeError:  # pragma: no cover - Python 3.8/3.9
+    STDLIB_MODULE_NAMES = frozenset(
+        {
+            "__future__", "abc", "argparse", "base64", "collections", "concurrent",
+            "contextlib", "copy", "csv", "datetime", "functools", "glob", "hashlib",
+            "importlib", "inspect", "io", "itertools", "json", "logging", "math",
+            "multiprocessing", "os", "pathlib", "pickle", "random", "re", "shutil",
+            "string", "struct", "subprocess", "sys", "tempfile", "textwrap",
+            "threading", "time", "traceback", "typing", "uuid", "warnings",
+        }
+    )  # fmt: skip
+
+
+def _module_level_imports(tree):
+    """Yield ``(top_level_name, lineno)`` for every absolute import at module scope.
+
+    Module scope includes the bodies of module-level ``if``/``try`` blocks — that
+    is where both documented exceptions live — but never a function or class body,
+    which is exactly where D17 put the heavy imports.
+    """
+    pending = list(tree.body)
+    while pending:
+        node = pending.pop()
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            continue
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                yield alias.name.split(".")[0], node.lineno
+        elif isinstance(node, ast.ImportFrom):
+            if node.level == 0 and node.module:  # level > 0 is a relative import
+                yield node.module.split(".")[0], node.lineno
+        else:
+            pending.extend(ast.iter_child_nodes(node))
+
+
+def test_no_undocumented_module_level_third_party_imports():
+    """The forward-looking half of the D17 guard.
+
+    :func:`test_bare_import_keeps_heavy_modules_unloaded` checks a fixed blocklist
+    and gives the better failure message; this one is open-ended, so a cherry-pick
+    from upstream that adds a module-level import of something nobody has thought
+    of yet fails here instead of shipping.
+    """
+    import pyAMARES
+
+    package_root = os.path.dirname(os.path.abspath(pyAMARES.__file__))
+    offenders = []
+    for directory, subdirectories, filenames in os.walk(package_root):
+        subdirectories[:] = [
+            d
+            for d in subdirectories
+            if d not in UNSCANNED_SUBPACKAGES and d != "__pycache__"
+        ]
+        for filename in sorted(filenames):
+            if not filename.endswith(".py"):
+                continue
+            path = os.path.join(directory, filename)
+            relative = os.path.relpath(path, package_root)
+            allowed = ALLOWED_MODULE_LEVEL | MODULE_LEVEL_EXCEPTIONS.get(
+                relative, frozenset()
+            )
+            with open(path, encoding="utf-8") as handle:
+                tree = ast.parse(handle.read(), filename=path)
+            for name, lineno in _module_level_imports(tree):
+                if name in STDLIB_MODULE_NAMES or name == "pyAMARES":
+                    continue
+                if name not in allowed:
+                    offenders.append("{}:{}: {}".format(relative, lineno, name))
+
+    assert not offenders, (
+        "module-level third-party imports that D17 does not allow:\n  "
+        + "\n  ".join(sorted(offenders))
+        + "\nImport them inside the function that uses them, or — if the binding "
+        "genuinely has to happen at import time — add the file to "
+        "MODULE_LEVEL_EXCEPTIONS with a reason and a DIVERGENCE.md entry."
+    )

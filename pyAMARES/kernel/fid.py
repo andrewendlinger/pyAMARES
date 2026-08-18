@@ -1,6 +1,4 @@
 # import re
-import matplotlib.pyplot as plt
-import nmrglue as ng
 import numpy as np
 
 from ..libs.logger import get_logger
@@ -248,6 +246,10 @@ def fft_params(timeaxis, params, fid=False, return_mat=False):
         return multieq6(params, timeaxis, return_mat=return_mat)
     if fid:
         return uninterleave(multieq6(params, timeaxis, return_mat=return_mat))
+    # Imported here, below the early returns: the return_mat / fid branches above are
+    # the ones a headless fit takes, and they must not pay the nmrglue import (D17).
+    import nmrglue as ng
+
     # spec = np.fft.fftshift(np.fft.fft((uninterleave(multieq6(params, timeaxis)))))
     spec = ng.proc_base.fft((uninterleave(multieq6(params, timeaxis))))
     return spec
@@ -300,6 +302,8 @@ def process_fid(fid, deadtime=0.0, sw=10000, lb=5.0, ifphase=False, ifplot=False
     Returns:
         1D numpy array: The processed spectrum.
     """
+    import nmrglue as ng
+
     fidpt = len(fid)
     dwelltime = 1 / sw  # noqa F841  #place holder
     # timeaxis = np.arange(0, dwelltime * fidpt, dwelltime) + deadtime
@@ -417,6 +421,8 @@ def simulate_fid(
         numpy.ndarray: The simulated FID signal, optionally with added noise to achieve the target SNR.
     """
 
+    import nmrglue as ng
+
     sw = float(sw)
     MHz = float(MHz)
     deadtime = float(deadtime)
@@ -431,6 +437,8 @@ def simulate_fid(
     if snr_target is not None:
         fidsim = add_noise_FID(fidsim, snr_target, indsignal, pts_noise)
     if preview:
+        import matplotlib.pyplot as plt
+
         Hz = np.linspace(-sw / 2, sw / 2, fid_len)
         if snr_target is None:
             label = "Pure FID"

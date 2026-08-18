@@ -1,7 +1,5 @@
 from copy import deepcopy
 
-import matplotlib.pyplot as plt
-import nmrglue as ng
 import numpy as np
 import scipy
 from scipy.signal import firls, freqz, lfilter
@@ -224,6 +222,9 @@ def MPFIR(
     signal = lfilter(np.flip(fir_h), 1, signal)
     signal = np.concatenate([signal[len(fir_h) - 1 :], np.zeros(len(fir_h) - 1)])
     if ifplot:
+        import matplotlib.pyplot as plt
+        import nmrglue as ng
+
         sw = 1.0 / dwelltime  # Hz
         ppm = np.linspace(-sw / np.abs(MHz) / 2, sw / np.abs(MHz) / 2, len(signal))
         plt.plot(ppm, np.abs(ng.proc_base.fft(fid)), "r-", alpha=0.6, label="input fid")

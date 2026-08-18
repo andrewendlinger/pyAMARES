@@ -1,7 +1,5 @@
 from copy import deepcopy
 
-import matplotlib.pyplot as plt
-import nmrglue as ng
 import numpy as np
 import pandas as pd
 
@@ -13,6 +11,14 @@ from lmfit import Parameters
 
 from ..util.visualization import preview_HSVD
 
+# The HSVD backend binding below is deliberately module-level, unlike the heavy
+# imports that D17 moved into the function bodies: which backend this module ends
+# up with is an import-time rule (numpy <2 -> hlsvdpro if importable, else the
+# vendored copy; numpy >=2 -> always the vendored copy), and that rule is pinned by
+# tests/test_regression.py::test_hsvd_backend_selection. `create_hlsvd_fids` is
+# imported eagerly for the same reason -- it comes from the vendored pure-Python
+# module, which costs nothing. hlsvdpro is therefore deliberately excluded from the
+# import-graph guard in tests/test_api_surface.py.
 if int(np.__version__.split(".")[0]) < 2:  # Check if numpy version is less than 2.0
     try:
         import hlsvdpro as hlsvd
@@ -45,6 +51,7 @@ def HSVDp0(hsvdfid, timeaxis, ppm, MHz=120, ifplot=True):
     Returns:
         numpy.ndarray: An array containing the fitted parameters [amplitude, frequency, linewidth, phase].
     """
+    import nmrglue as ng
 
     def lorentzian(x, ak=1.0, fk=0, dk=50, phi=0):
         """
@@ -80,6 +87,8 @@ def HSVDp0(hsvdfid, timeaxis, ppm, MHz=120, ifplot=True):
     hsvdp0 = np.zeros(5)
     hsvdp0[:4] = p0
     if ifplot:
+        import matplotlib.pyplot as plt
+
         plt.plot(ppm, spec.real, label="origin")
         plt.plot(ppm, fittedspec.real, label="fitted HSVD")
         plt.legend()
@@ -311,6 +320,8 @@ def HSVDinitializer(
         )
 
     if preview:
+        import matplotlib.pyplot as plt
+
         fig, ax = plt.subplots(figsize=(8, 4))
         preview_HSVD(
             ax,
