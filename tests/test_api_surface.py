@@ -413,3 +413,71 @@ def test_no_undocumented_module_level_third_party_imports():
         "genuinely has to happen at import time — add the file to "
         "MODULE_LEVEL_EXCEPTIONS with a reason and a DIVERGENCE.md entry."
     )
+
+
+# --------------------------------------------------------------------------------
+# Optional dependencies: the message says which extra to install (D18)
+# --------------------------------------------------------------------------------
+#
+# mat73, openpyxl and xlrd left install_requires in 0.5.0. Each import site that
+# lost its guaranteed dependency has to fail with a message naming the extra that
+# restores it. These tests simulate the missing dependency rather than requiring
+# it to be absent, so they assert the same thing on every stack — bare install or
+# ``[jupyter]``.
+
+
+def test_v73_mat_read_without_mat73_names_the_matlab_extra(monkeypatch, tmp_path):
+    """``readmrs`` on a v7.3 .mat, with mat73 unimportable."""
+    from pyAMARES.fileio import readmat
+
+    # ``None`` in sys.modules makes the import machinery raise ImportError, which
+    # is what a genuinely absent mat73 does. monkeypatch removes the key again.
+    monkeypatch.setitem(sys.modules, "mat73", None)
+    monkeypatch.setattr(readmat, "is_mat_file_v7_3", lambda filename: True)
+
+    with pytest.raises(ImportError) as excinfo:
+        readmat.readmrs(str(tmp_path / "v73.mat"))
+
+    assert "pyamares-xmris[matlab]" in str(excinfo.value)
+    assert isinstance(excinfo.value.__cause__, ImportError)
+
+
+def test_read_fidall_without_mat73_names_the_matlab_extra(monkeypatch, tmp_path):
+    """The second v7.3 branch, in ``read_fidall``."""
+    from pyAMARES.fileio import readfidall
+
+    monkeypatch.setitem(sys.modules, "mat73", None)
+    monkeypatch.setattr(readfidall, "is_mat_file_v7_3", lambda filename: True)
+
+    with pytest.raises(ImportError) as excinfo:
+        readfidall.read_fidall(str(tmp_path / "v73.mat"))
+
+    assert "pyamares-xmris[matlab]" in str(excinfo.value)
+    assert isinstance(excinfo.value.__cause__, ImportError)
+
+
+def test_excel_prior_without_an_engine_names_the_excel_extra(monkeypatch, tmp_path):
+    """``generateparameter`` on an .xlsx prior, with no pandas Excel engine.
+
+    pandas itself raises ``ImportError("Missing optional dependency 'openpyxl'")``
+    in that situation; the wrapper has to turn it into an instruction.
+    """
+    import pandas as pd
+
+    from pyAMARES.kernel import PriorKnowledge
+
+    def missing_engine(*args, **kwargs):
+        raise ImportError(
+            "Missing optional dependency 'openpyxl'. Use pip or conda to install "
+            "openpyxl."
+        )
+
+    monkeypatch.setattr(pd, "read_excel", missing_engine)
+
+    with pytest.raises(ImportError) as excinfo:
+        PriorKnowledge.generateparameter(str(tmp_path / "prior.xlsx"))
+
+    message = str(excinfo.value)
+    assert "pyamares-xmris[excel]" in message
+    assert "CSV" in message  # the no-extra way out
+    assert isinstance(excinfo.value.__cause__, ImportError)
