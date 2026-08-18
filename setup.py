@@ -69,11 +69,22 @@ excel_requirements = [
     "xlrd",
 ]
 
+# The optional native HSVD backend. Deliberately its own extra and part of no
+# other: on any environment with setuptools >= 82 -- i.e. everything from Python
+# 3.9 up -- hlsvdpro 2.0.0 installs but cannot import (module-scope
+# `import pkg_resources`), and util/hsvd.py never looks for it under numpy >= 2.
+# It is still live on x86_64 Python 3.8 with numpy 1.x, where setuptools is
+# capped below 82, and that is who this extra is for. The marker is D1's: the
+# project publishes x86_64/amd64 wheels only, and no sdist. See D18.
+hlsvd_requirements = [
+    "hlsvdpro>=2.0.0; platform_machine == 'x86_64' or platform_machine == 'amd64'",
+]
+
 # Everything the example notebooks and the interactive workflows need. Plain
 # list concatenation rather than self-referential extras, so the metadata stays
 # readable on old pip/setuptools: `pip install 'pyamares-xmris[jupyter]'`
-# reproduces the pre-0.5.0 install (minus the dead hlsvdpro), plus notebook and
-# openpyxl. See D18.
+# reproduces the pre-0.5.0 install (minus hlsvdpro, which has its own extra),
+# plus notebook and openpyxl. See D18.
 jupyter_requirements = (
     [
         "notebook",
@@ -168,6 +179,7 @@ setup(
     extras_require={
         "matlab": matlab_requirements,
         "excel": excel_requirements,
+        "hlsvd": hlsvd_requirements,
         "jupyter": jupyter_requirements,
         "docs": doc_requirements,
         "ruff": ruff_requirements,
