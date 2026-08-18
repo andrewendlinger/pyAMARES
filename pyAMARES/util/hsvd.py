@@ -4,7 +4,11 @@ import matplotlib.pyplot as plt
 import nmrglue as ng
 import numpy as np
 import pandas as pd
-import scipy
+
+# scipy.optimize.curve_fit is used below. `import scipy` alone does not bind the
+# submodule -- it has only ever resolved here because lmfit imports scipy.optimize
+# as a side effect, which is not a contract lmfit owes us.
+import scipy.optimize
 from lmfit import Parameters
 
 from ..util.visualization import preview_HSVD
@@ -203,9 +207,16 @@ def uniquify_dataframe(df):
             group.loc[group.index != max_ak_idx, "name"] = np.nan
         return group
 
-    df_non_nan = (
-        df[df["name"].notna()].groupby("name", group_keys=False).apply(process_group)
-    )
+    df_named = df[df["name"].notna()]
+    # The column selection is load-bearing, not cosmetic: process_group needs the
+    # grouping column "name" inside each group. pandas 2.2 deprecated passing it
+    # implicitly and pandas 3 dropped it, at which point `group.loc[..., "name"]`
+    # silently *creates* an all-NaN column and every peak loses its name. Naming
+    # the columns explicitly is the documented replacement and behaves identically
+    # on pandas 1.x/2.x.
+    df_non_nan = df_named.groupby("name", group_keys=False)[
+        list(df_named.columns)
+    ].apply(process_group)
 
     df_nan = df[df["name"].isna()]
     result_df = pd.concat([df_non_nan, df_nan]).sort_index()

@@ -16,6 +16,14 @@ hlsvdpro
 ^^^^^^^^
 The library `hlsvdpro` is used under its BSD-3-Clause License. For detailed license information, please visit the `hlsvdpro PyPI page <https://pypi.org/project/hlsvdpro/>`_.
 
+hlsvdpropy (vendored)
+^^^^^^^^^^^^^^^^^^^^^
+
+``pyAMARES/libs/hlsvd.py`` is a vendored copy of ``hlsvdpropy/hlsvd.py`` from
+`hlsvdpropy <https://github.com/bsoher/hlsvdpropy>`_ version 2.0.2, Copyright (c) 2020 Brian J Soher, used under its BSD 3-Clause License.
+It is the fallback HSVD backend, used whenever the compiled ``hlsvdpro`` package is unavailable — always under NumPy 2.x, and on any platform for which ``hlsvdpro`` ships no wheel.
+The full license text, and the list of local modifications, are reproduced in the header of that file.
+
 Additional Note on MPFIR Function
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 

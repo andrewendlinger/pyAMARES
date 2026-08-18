@@ -1,0 +1,22 @@
+# Regression prior for the float32 lossy-setitem path in unitconverter(). Not a,,
+# physics fixture: every number is chosen for its dtype, not for any spectrum.,,
+# "Big" holds an amplitude that overflows float32, so safe_convert_to_numeric's,,
+# downcast="float" leaves that column float64 and every row cross-section is,,
+# float64 -- which makes the chemicalshift and linewidth writes into "Wide"'s,,
+# float32 column lossy. "Wide" carries a 180 degree phase (deg2rad -> pi, with no,,
+# float32 representation) under *unequal* bounds, so generateparameter reads it,,
+# from the converted column rather than taking the lval == uval shortcut.,,
+# See test_unitconverter_survives_a_lossy_float32_writeback.,,
+Index,Wide,Big
+Initial Values,,
+amplitude,1.0,1e39
+chemicalshift,0.1,0.1
+linewidth,7,7
+phase,180,0
+g,0,0
+Bounds,,
+amplitude,"(0, 5)","(0, 1e40)"
+chemicalshift,"(-1.0, 1.0)","(-1.0, 1.0)"
+linewidth,"(1, 40)","(1, 40)"
+phase,"(-180, 180)","(-180, 180)"
+g,"(0, 1)","(0, 1)"

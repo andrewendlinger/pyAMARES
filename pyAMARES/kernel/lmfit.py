@@ -292,6 +292,13 @@ def load_parameter_from_csv(filename="params.csv"):
 
     df = pd.read_csv(filename)
     df = df.dropna(how="all")  # Drop rows where all elements are NaN
+    # Deliberately NOT df.astype(object).where(...): casting first turns a blank
+    # numeric cell (a hand-edited params.csv with an empty value/min/max) into a
+    # real None, which lmfit reads as min=-inf/max=+inf and clamps a None value
+    # to the lower bound. Left as float64, a blank stays NaN -- which is what
+    # dataframe_to_parameters tests for with pd.isna, and what pandas 3 produces
+    # here too: on a PDEP-14 `str` expr column this line already yields NaN for a
+    # missing expression, so no cast is needed for pandas 3 either.
     df = df.where(pd.notnull(df), None)  # Conver NaN to pd None
     params = dataframe_to_parameters(df)
     return params

@@ -111,13 +111,19 @@ def test_result_multiplets_index_is_metabolite_names(fitted_example):
     )
     assert all(name.strip() for name in index), f"empty metabolite name in {index!r}"
     assert len(set(index)) == len(index), f"duplicate metabolite names in {index!r}"
-    # Today this equality is a *coincidence*, not a library guarantee: the
-    # mechanism meant to enforce it is a no-op — pyAMARES/util/report.py calls
-    # ``result.reindex(fid_parameters.peaklist)`` and discards the return value —
-    # so row order is really lmfit parameter insertion order, which happens to
-    # match the prior-file peak order. If this assert ever fails, the root cause
-    # is that discarded reindex, not this test.
     assert index == fitted_example.peaklist
+    # The name check above cannot stand on its own. Since 0.4.0 the order is
+    # enforced by pyAMARES/util/report.py binding ``result = result.reindex(
+    # fid_parameters.peaklist)`` when the two label sets agree -- and reindex
+    # produces exactly those names whether or not any fitted value survives it.
+    # So assert on the values too: a reindex against a divergent label set fills
+    # the table with NaN while leaving this index perfect.
+    values = fitted_example.result_multiplets
+    for column in ("amplitude", "chem shift(ppm)", "LW(Hz)", "phase(deg)", "SNR"):
+        assert values[column].notna().all(), (
+            f"{column!r} has NaN rows, so result_multiplets was reindexed against "
+            f"a peak set the fit does not cover:\n{values[column]}"
+        )
 
 
 def test_xmris_shape_fit_produces_the_same_table_shape(fitted_example_xmris_shape):

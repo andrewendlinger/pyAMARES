@@ -293,10 +293,34 @@ def report_amares(outparams, fid_parameters, verbose=False):
     result["name"] = peaklist
     result = result.set_index("name")
     if hasattr(fid_parameters, "peaklist"):
-        # By default, there should be a peak list from the fid_parameters
-        result.reindex(
-            fid_parameters.peaklist
-        )  # reorder to the peaklist from the pk, not the local peaklist
+        # By default, there should be a peak list from the fid_parameters.
+        # Upstream intent: reorder the rows to the peak order of the
+        # prior-knowledge file rather than the local peaklist read back out of
+        # the fitted parameters. Until 0.4.0 the return value was discarded, so
+        # the reorder never actually happened -- harmless, because the two
+        # orders coincide for every prior pyAMARES can parse, and protective
+        # whenever the two label *sets* do not.
+        #
+        # That set guard is what makes binding the result safe. reindex on a
+        # divergent label set is destructive: it drops every fitted peak whose
+        # name is absent from peaklist and injects an all-NaN row for every
+        # peaklist name that was not fitted. Two supported workflows diverge --
+        # fitting with HSVD-derived parameters (peaks named "1".."N", which is
+        # what `amaresFit --use_hsvd` does) shares no name at all and would
+        # empty the table, and filter_param_by_ppm drops the peaks outside the
+        # fitted window. So reorder only when the sets agree; otherwise leave
+        # the fitted rows exactly as they are.
+        if set(fid_parameters.peaklist) == set(result.index):
+            result = result.reindex(
+                fid_parameters.peaklist
+            )  # reorder to the peaklist from the pk, not the local peaklist
+        else:
+            logger.info(
+                "The fitted peaks %s do not match the prior knowledge peaklist %s. "
+                "Keeping the fitted peak order.",
+                list(result.index),
+                list(fid_parameters.peaklist),
+            )
     # fid_parameters.peaklist = peaklist
     else:
         logger.info("No peaklist, probably it is from an HSVD initialized object")

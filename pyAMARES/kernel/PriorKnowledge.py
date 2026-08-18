@@ -114,7 +114,12 @@ def extract_expr(pk, MHz=120.0):
     Returns:
         pandas.DataFrame: A DataFrame with processed expressions and potential parameter prefixes in cell values.
     """
-    df = deepcopy(pk.iloc[1:6])
+    # object dtype so that the None sentinel returned by process_expression below
+    # survives assignment. Under pandas >= 3 (PDEP-14) a text column is the `str`
+    # dtype, where None is stored as a missing value and reads back as float NaN --
+    # which would silently defeat both `return None` and the `is None` check in
+    # process_df_corrected, and hand lmfit a NaN as an `expr`.
+    df = deepcopy(pk.iloc[1:6]).astype(object)
 
     def process_expression(expr, MHz):
         """
@@ -166,6 +171,53 @@ def extract_expr(pk, MHz=120.0):
     return process_df_corrected(df)
 
 
+def _widen_columns_that_cannot_hold(df, values):
+    """
+    Widen to float64 exactly those columns whose dtype cannot hold ``values``.
+
+    ``safe_convert_to_numeric`` calls ``pd.to_numeric(..., downcast="float")``, so
+    numeric prior-knowledge cells arrive as **float32**. Writing a float64 result
+    back into such a column is a lossy setitem whenever the value has no float32
+    representation -- ``np.deg2rad(180) == 3.141592653589793`` is the case that
+    bites, and a 180 degree prior phase is ordinary. pandas up to 2.3 widened the
+    column itself and only warned::
+
+        FutureWarning: Setting an item of incompatible dtype is deprecated ...
+
+    pandas 3 refuses::
+
+        TypeError: Invalid value '3.141592653589793' for dtype 'float32'
+
+    Doing the widening here, and only for the columns pandas would have widened,
+    reproduces the pandas <= 2.3 outcome exactly on every supported pandas: the
+    untouched columns keep their float32 dtype and their float32 arithmetic.
+
+    Args:
+        df (pandas.DataFrame): The DataFrame about to be written to.
+        values (pandas.Series): The values to be written, indexed by column label.
+
+    Returns:
+        pandas.DataFrame: ``df`` itself if nothing needs widening, otherwise a
+        copy with the offending columns cast to ``float64``.
+    """
+    widen = {}
+    for col, value in values.items():
+        dtype = df[col].dtype
+        if dtype.kind != "f" or dtype.itemsize >= 8:
+            # object, integer, or already float64 -- nothing to lose. Skipping
+            # object columns first is also what keeps the check below safe: a
+            # value can only be non-numeric (an expression string that survived
+            # extractini) if its own column is object.
+            continue
+        # float() on both sides is load-bearing: comparing the narrowed numpy
+        # scalar against the original directly is a lie under numpy 2, whose
+        # NEP 50 rules demote the weak Python float to float32 and report the
+        # round trip as lossless.
+        if np.isfinite(value) and float(dtype.type(value)) != float(value):
+            widen[col] = np.float64
+    return df.astype(widen) if widen else df
+
+
 def unitconverter(df_ini, MHz=120.0):
     """
     Convert units of parameters in a DataFrame based on their physical context.
@@ -181,16 +233,35 @@ def unitconverter(df_ini, MHz=120.0):
         pandas.DataFrame: A DataFrame with converted unit values in specified rows.
     """
     df = deepcopy(df_ini)
+
+    # All three conversions are written the same way -- compute the converted
+    # values at the row's own dtype, widen only the columns that cannot hold the
+    # result, then write. Splitting the `*=` into a read and a write is what lets
+    # the widening happen in between; the arithmetic is unchanged, so a column
+    # that needs no widening keeps its float32 dtype and its float32 arithmetic.
+    #
+    # The multiplications need the guard as much as the phase does: whenever one
+    # peak column stays object -- extractini's `except Exception: return expr`
+    # keeps an unevaluable expression string -- the whole row cross-section is
+    # object, the arithmetic promotes to float64, and the writeback into the
+    # float32 sibling columns is a lossy setitem.
     if "chemicalshift" in df.index:
-        df.loc["chemicalshift", df.notna().loc["chemicalshift"]] *= MHz
+        mask = df.notna().loc["chemicalshift"]
+        values = df.loc["chemicalshift", mask] * MHz
+        df = _widen_columns_that_cannot_hold(df, values)
+        df.loc["chemicalshift", mask] = values
 
     if "linewidth" in df.index:
-        df.loc["linewidth", df.notna().loc["linewidth"]] *= np.pi
+        mask = df.notna().loc["linewidth"]
+        values = df.loc["linewidth", mask] * np.pi
+        df = _widen_columns_that_cannot_hold(df, values)
+        df.loc["linewidth", mask] = values
 
     if "phase" in df.index:
-        df.loc["phase", df.notna().loc["phase"]] = np.deg2rad(
-            df.loc["phase"][df.notna().loc["phase"]].astype(float)
-        )
+        mask = df.notna().loc["phase"]
+        values = np.deg2rad(df.loc["phase", mask].astype(float))
+        df = _widen_columns_that_cannot_hold(df, values)
+        df.loc["phase", mask] = values
 
     return df
 
@@ -211,8 +282,13 @@ def parse_bounds(df):
         df_ub (pandas.DataFrame): A DataFrame containing the parsed upper bounds.
     """
     df_bounds = deepcopy(df.iloc[7:])
-    df_lb = pd.DataFrame(index=df_bounds.index, columns=df_bounds.columns)
-    df_ub = pd.DataFrame(index=df_bounds.index, columns=df_bounds.columns)
+    # dtype=object is the truthful dtype: the loop below fills these frames with a
+    # mixture of floats, NaN and raw strings via .at[]. Leaving the dtype implicit
+    # makes the result depend on whatever pandas infers for an empty frame, which
+    # has changed across pandas majors. Everything downstream is normalised by the
+    # safe_convert_to_numeric maps in generateparameter().
+    df_lb = pd.DataFrame(index=df_bounds.index, columns=df_bounds.columns, dtype=object)
+    df_ub = pd.DataFrame(index=df_bounds.index, columns=df_bounds.columns, dtype=object)
 
     for col in df_bounds.columns:
         for idx in df_bounds.index:
@@ -369,10 +445,17 @@ def generateparameter(
             lval = df_lb2[peak].iloc[i]
             uval = df_ub2[peak].iloc[i]
             expr = df_expr[peak].iloc[i]
-            # Handle NaN values for bounds
-            if np.isnan(lval):
+            # lmfit expects either a string expression or None. Anything else --
+            # notably the float NaN a `str`-dtype column yields for a missing cell
+            # under pandas >= 3 -- means "no expression".
+            if not isinstance(expr, str):
+                expr = None
+            # Handle NaN values for bounds. pd.isna rather than np.isnan: it agrees
+            # with np.isnan on floats but also copes with None and with the strings
+            # that survive safe_convert_to_numeric when a bound is not numeric.
+            if pd.isna(lval):
                 lval = -np.inf
-            if np.isnan(uval):
+            if pd.isna(uval):
                 uval = np.inf
             name = para + "_" + peak
             if (para == "ak") and scale_amplitude != 1.0:
