@@ -34,19 +34,18 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Install package
+      - name: Install the package on the stack the goldens are frozen on
+        # One install, pins and all. test-regression.yml installs twice because
+        # its pins come from a matrix and one leg has none; here the stack is
+        # fixed, so an unpinned install first would only be resolution work
+        # thrown away. The pins sit alongside `-e .` rather than in a second
+        # command for the reason that file spells out: pip has to be free to
+        # backtrack every dependent onto a version they allow (numpy 1.26.4 wants
+        # scipy 1.17.1, not the 1.18 a bare install picks), which it cannot do if
+        # they land on top of an already resolved environment.
         run: |
           python -m pip install --upgrade pip setuptools wheel
-          python -m pip install -e .
-
-      - name: Pin the stack the goldens are frozen on
-        # `-e .` is named again on purpose, so the pins bind a full re-resolution
-        # of the dependency set rather than being dropped on top of an already
-        # resolved environment — the same reason test-regression.yml does it. A
-        # bare `pip install numpy==1.26.4` would leave behind the scipy the first
-        # install picked (1.18, which requires numpy>=2), and the package would
-        # stop importing.
-        run: python -m pip install -e . 'numpy==1.26.4' 'pandas==2.1.4'
+          python -m pip install -e . 'numpy==1.26.4' 'pandas==2.1.4'
 
       - name: Check the environment is internally consistent
         # A capture taken on a stack that does not hang together is worse than no
@@ -59,13 +58,22 @@ jobs:
       - name: Capture the goldens
         # --force because the linux-x86_64 directory may already hold a reviewed
         # set; re-capturing into a fresh checkout is the whole job. The output
-        # directory is created by capture_goldens.py itself if it does not exist.
+        # directory is created by capture_goldens.py itself if it does not exist,
+        # and the script refuses a --write named after a platform that is not the
+        # one it is running on — so this path cannot quietly freeze the wrong
+        # machine's numbers if the job is ever moved off ubuntu x86_64.
         run: python tests/capture_goldens.py --write tests/goldens/linux-x86_64/ --force
 
       - name: Show what was captured
+        # `git diff` alone shows nothing while the directory is untracked, which
+        # is precisely the state of the first capture. `git status` covers that
+        # era; `git add -N` then makes the *content* diffable, so a re-capture
+        # over an already-committed set shows which numbers actually moved.
         run: |
           ls -l tests/goldens/linux-x86_64/
-          git --no-pager diff --stat -- tests/goldens/ || true
+          git status --short -- tests/goldens/
+          git add -N tests/goldens/linux-x86_64/
+          git --no-pager diff --stat -- tests/goldens/
 
       - name: Upload the captured goldens for review
         uses: actions/upload-artifact@v4
