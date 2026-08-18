@@ -1,5 +1,3 @@
-import matplotlib.pyplot as plt
-import nmrglue as ng
 import numpy as np
 
 from ..kernel.fid import process_fid
@@ -41,6 +39,9 @@ def preview_HSVD(ax, hsvdarr, ppm, p_pd, xlim=None, title="", xlabel=None):
         title (str, optional): Title for the plot. Defaults to ``""``.
         xlabel (str, optional): Label for the x-axis. Defaults to None.
     """
+    import matplotlib.pyplot as plt
+    import nmrglue as ng
+
     hsvdspec = ng.proc_base.fft(np.sum(hsvdarr, axis=1))
     plt.title(title)
 
@@ -96,6 +97,8 @@ def plot_fit(
             - ifphase (bool): turn on 0th and 1st order phasing.
 
     """
+    import nmrglue as ng
+
     if plotParameters is None:
         spec = ng.proc_base.fft(fid)
         spec_fit = ng.proc_base.fft(fid_fit)
@@ -171,6 +174,8 @@ def combined_plot(
 
           filename (str or None, optional): If provided, the figure will be saved to this file. Defaults to None.
     """
+    import matplotlib.pyplot as plt
+
     # print(f"{xlim=}")
     fig, (ax1, ax2) = plt.subplots(
         2, 1, figsize=(10, 8), sharex=True, layout="constrained"

@@ -1,6 +1,4 @@
 # import re
-import matplotlib.pyplot as plt
-import nmrglue as ng
 import numpy as np
 
 from ..libs.logger import get_logger
@@ -242,6 +240,8 @@ def fft_params(timeaxis, params, fid=False, return_mat=False):
     Returns:
         numpy.ndarray: Depending on the arguments, either raw FID signals, uninterleaved FID signals, or the FFT spectra of the FID signals.
     """
+    import nmrglue as ng
+
     # Return raw FID signals if return_mat is True
     # parmas is the lmfit Parameters() style
     if return_mat:
@@ -300,6 +300,8 @@ def process_fid(fid, deadtime=0.0, sw=10000, lb=5.0, ifphase=False, ifplot=False
     Returns:
         1D numpy array: The processed spectrum.
     """
+    import nmrglue as ng
+
     fidpt = len(fid)
     dwelltime = 1 / sw  # noqa F841  #place holder
     # timeaxis = np.arange(0, dwelltime * fidpt, dwelltime) + deadtime
@@ -417,6 +419,8 @@ def simulate_fid(
         numpy.ndarray: The simulated FID signal, optionally with added noise to achieve the target SNR.
     """
 
+    import nmrglue as ng
+
     sw = float(sw)
     MHz = float(MHz)
     deadtime = float(deadtime)
@@ -431,6 +435,8 @@ def simulate_fid(
     if snr_target is not None:
         fidsim = add_noise_FID(fidsim, snr_target, indsignal, pts_noise)
     if preview:
+        import matplotlib.pyplot as plt
+
         Hz = np.linspace(-sw / 2, sw / 2, fid_len)
         if snr_target is None:
             label = "Pure FID"

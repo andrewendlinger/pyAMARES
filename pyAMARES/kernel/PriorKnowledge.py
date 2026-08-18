@@ -2,7 +2,6 @@ import argparse
 import re
 from copy import deepcopy
 
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from lmfit import Parameters
@@ -704,6 +703,8 @@ def initialize_FID(
         opts.allpara = opts.initialParams  # obsolete API, will be removed
 
     if preview:
+        import matplotlib.pyplot as plt
+
         plt.title("Preview of Input FID and Initial Parameters")
         plt.plot(opts.ppm, opts.spec.real, "r-", label="Original Spec")
         if priorknowledgefile is not None:

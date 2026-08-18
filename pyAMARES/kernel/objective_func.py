@@ -1,4 +1,3 @@
-import nmrglue as ng
 import numpy as np
 
 from .fid import interleavefid, multieq6, uninterleave
@@ -16,6 +15,8 @@ def objective_range(params, x, fid, fit_range=None):
     if fit_range is None:
         return residual
     else:
+        import nmrglue as ng
+
         residual = ng.proc_base.fft(uninterleave(residual))
     return interleavefid(residual[fit_range[0] : fit_range[1]])
 
