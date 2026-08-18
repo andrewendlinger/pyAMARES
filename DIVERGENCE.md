@@ -112,7 +112,7 @@ Nothing under `pyAMARES/` is modified. All entries below are `setup.py` metadata
 
 ---
 
-# D — Divergences (shipped in 0.4.0, unreleased)
+# D — Divergences (shipped in 0.4.0)
 
 D6–D15 are the first entries that touch code under `pyAMARES/`. Their shared
 purpose is to make the source correct under numpy 2, pandas ≥2.2 and pandas 3
