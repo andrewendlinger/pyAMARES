@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import os
 import platform
+import re
 import sys
 
 # Since D17, `import pyAMARES` no longer pulls in matplotlib.pyplot -- but the fits
@@ -58,6 +59,24 @@ def platform_goldens_key() -> str:
 def platform_goldens_dir() -> str:
     """Absolute path of :func:`platform_goldens_key`'s directory (may not exist)."""
     return os.path.join(GOLDENS_DIR, platform_goldens_key())
+
+
+#: The grammar :func:`platform_goldens_key` builds: two lowercase-led words joined
+#: by a hyphen, the second allowed digits, underscores and dots (``linux-x86_64``,
+#: ``darwin-arm64``, ``win32-AMD64`` — hence the case-insensitive machine half).
+#: Single source for both the test that policies ``tests/goldens/`` subdirectories
+#: and ``capture_goldens.py``'s refusal to write a platform set on the wrong host.
+PLATFORM_DIR_RE = re.compile(r"^[a-z][a-z0-9]*-[A-Za-z0-9_.]+$")
+
+
+def looks_like_platform_dir(name: str) -> bool:
+    """Is ``name`` shaped like a platform golden directory (whatever the host)?
+
+    A *shape* test, not a match against this host: it is what lets a guard say
+    "you are writing into something that claims to be a platform set" before
+    checking whether it is *this* platform's.
+    """
+    return bool(PLATFORM_DIR_RE.match(name))
 
 
 # --- Case A: the documented README quick-start acquisition parameters -------------
@@ -379,23 +398,52 @@ def synthetic_variant_result(variant: str):
     return _SYNTHETIC_CACHE[variant]
 
 
-#: The golden cases, by name. Each entry returns the FID object whose
-#: ``result_multiplets`` gets frozen. ``capture_goldens.py`` and
-#: ``test_regression.py`` both iterate this mapping, so adding a golden case is a
-#: one-line change here. The synthetic entry reuses the named
-#: :data:`SYNTHETIC_VARIANTS` spec through the memoized runner, so the golden and
-#: the physics tests cannot drift apart.
-GOLDEN_CASES = {
-    "example_readme": run_example_case,
-    "example_xmris_shape": run_example_xmris_shape_case,
-    "synthetic_noise1_gfree": lambda: synthetic_variant_result("noise1_gfree")[0],
+#: Payload kind of a case whose golden freezes a ``result_multiplets`` table.
+KIND_RESULT_MULTIPLETS = "result_multiplets"
+#: Payload kind of a case whose golden freezes an HSVD decomposition.
+KIND_HSVD_COMPONENTS = "hsvd_components"
+
+#: **The** golden-case registry: ``name -> (payload kind, runner)``, in capture
+#: order (dicts preserve insertion order). Everything else about the case set is
+#: derived from this one mapping — the name set the goldens directory is policed
+#: against, the capture order, and which payload builder ``capture_goldens.py``
+#: dispatches to — so a case can never exist in one list and be missing from
+#: another. It used to: a name present in the validation set but absent from the
+#: capture order made ``--only <case>`` a silent no-op that wrote nothing and
+#: exited 0.
+#:
+#: Adding a case is two touchpoints, and no more: an entry here, and a capture.
+#: A case of a *new* kind is three — the kind also needs a payload builder in
+#: ``capture_goldens.PAYLOAD_BUILDERS``, which raises by name if you forget.
+#:
+#: The synthetic entry reuses the named :data:`SYNTHETIC_VARIANTS` spec through
+#: the memoized runner, so the golden and the physics tests cannot drift apart.
+GOLDEN_CASE_REGISTRY = {
+    "example_readme": (KIND_RESULT_MULTIPLETS, run_example_case),
+    "example_xmris_shape": (KIND_RESULT_MULTIPLETS, run_example_xmris_shape_case),
+    "synthetic_noise1_gfree": (
+        KIND_RESULT_MULTIPLETS,
+        lambda: synthetic_variant_result("noise1_gfree")[0],
+    ),
+    HSVD_VENDORED_CASE: (KIND_HSVD_COMPONENTS, run_hsvd_vendored_backend_case),
 }
 
-#: Every golden name, whatever the payload shape: the ``result_multiplets`` fit
-#: cases plus the vendored-HSVD-backend case. ``tests/goldens/`` (and each of its
-#: platform subdirectories) is checked against this set, and ``capture_goldens.py``
-#: validates ``--only`` against it.
-ALL_GOLDEN_NAMES = frozenset(GOLDEN_CASES) | {HSVD_VENDORED_CASE}
+#: The fit cases only — name -> runner returning the FID object whose
+#: ``result_multiplets`` gets frozen. Derived, never edited: the tests that are
+#: specific to that payload shape parametrize over it.
+GOLDEN_CASES = {
+    name: runner
+    for name, (kind, runner) in GOLDEN_CASE_REGISTRY.items()
+    if kind == KIND_RESULT_MULTIPLETS
+}
+
+#: Every golden name, whatever the payload shape. ``tests/goldens/`` and each of
+#: its platform subdirectories are policed against this set, and
+#: ``capture_goldens.py`` validates ``--only`` against it.
+ALL_GOLDEN_NAMES = frozenset(GOLDEN_CASE_REGISTRY)
+
+#: Capture order, and the order ``--only`` filters.
+CASE_ORDER = list(GOLDEN_CASE_REGISTRY)
 
 _CASE_CACHE: dict = {}
 

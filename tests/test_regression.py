@@ -33,7 +33,6 @@ import glob
 import json
 import math
 import os
-import re
 
 import numpy as np
 import pytest
@@ -79,6 +78,58 @@ def load_golden(name: str) -> dict:
     return golden
 
 
+class GoldenComparer:
+    """Cell-by-cell comparison against one golden's tolerance block.
+
+    Shared by both golden families — the ``result_multiplets`` tables and the HSVD
+    decomposition — because they had started to drift apart: two copies of the
+    same resolve-tolerance/isclose/format-the-mismatch loop, one keying its
+    overrides ``per_column`` and the other ``per_field``, with different NaN
+    guards and different message layouts. One helper, one JSON schema.
+
+    ``per_column`` is the schema's name for the override map even where the
+    payload calls its axis something else: the canonical fit goldens are frozen
+    and already spell it that way, so it is the spelling the HSVD golden adopted
+    rather than the other way round.
+
+    Mismatches accumulate instead of raising, so one red run shows every drifted
+    cell — a dependency bump that moves ten metabolites should show all ten, not
+    just the alphabetically first.
+    """
+
+    def __init__(self, tolerances: dict):
+        self.default_rtol = tolerances["default_rtol"]
+        self.default_atol = tolerances.get("default_atol", 0.0)
+        self.per_column = tolerances.get("per_column", {})
+        self.mismatches: list = []
+
+    def tolerances_for(self, column: str):
+        """``(rtol, atol)`` for one column/field, per-column override applied."""
+        override = self.per_column.get(column, {})
+        return (
+            override.get("rtol", self.default_rtol),
+            override.get("atol", self.default_atol),
+        )
+
+    def check(self, label: str, column: str, expected: float, actual: float) -> None:
+        """Compare one cell; record a formatted line if it is out of tolerance."""
+        rtol, atol = self.tolerances_for(column)
+        if np.isclose(actual, expected, rtol=rtol, atol=atol, equal_nan=True):
+            return
+        # A relative deviation is meaningless against zero or NaN; say so rather
+        # than dividing.
+        rel = (
+            abs(actual - expected) / abs(expected)
+            if expected and not math.isnan(expected)
+            else float("nan")
+        )
+        self.mismatches.append(
+            f"  {label:34s} expected {expected!r} got {actual!r} "
+            f"(rel {rel:.3e}, abs {abs(actual - expected):.3e}, "
+            f"rtol {rtol:.1e} atol {atol:.1e})"
+        )
+
+
 @pytest.mark.parametrize("case_name", sorted(rc.GOLDEN_CASES))
 def test_golden_result_multiplets(case_name):
     """Every golden cell of ``result_multiplets`` still matches the frozen value.
@@ -115,25 +166,17 @@ def test_golden_result_multiplets(case_name):
         f"  actual:   {[str(c) for c in df.columns]}"
     )
 
-    tol = golden["tolerances"]
-    per_column = tol.get("per_column", {})
-    mismatches = []
+    comparer = GoldenComparer(golden["tolerances"])
     for column, expected_col in golden["values"].items():
-        rtol = per_column.get(column, {}).get("rtol", tol["default_rtol"])
-        atol = per_column.get(column, {}).get("atol", tol["default_atol"])
         for metabolite, expected in expected_col.items():
-            actual = float(df.at[metabolite, column])
-            if not np.isclose(actual, expected, rtol=rtol, atol=atol, equal_nan=True):
-                rel = (
-                    abs(actual - expected) / abs(expected)
-                    if expected not in (0.0,) and not math.isnan(expected)
-                    else float("nan")
-                )
-                mismatches.append(
-                    f"  {column!r:20s} {metabolite:8s} "
-                    f"expected {expected!r} got {actual!r} (rel {rel:.3e})"
-                )
+            comparer.check(
+                f"{column!r} {metabolite}",
+                column,
+                expected,
+                float(df.at[metabolite, column]),
+            )
 
+    mismatches = comparer.mismatches
     assert not mismatches, (
         f"{case_name}: {len(mismatches)} golden cell(s) drifted against {source} "
         f"(captured on {golden['meta']['python']}/"
@@ -143,11 +186,17 @@ def test_golden_result_multiplets(case_name):
     )
 
 
-#: A platform golden directory is named ``<sys.platform>-<machine>``, the exact
-#: string :func:`regression_cases.platform_goldens_key` builds. Both halves are
-#: lowercase words that may carry digits, underscores or dots (``linux-x86_64``,
-#: ``darwin-arm64``, ``win32-AMD64`` — hence the case-insensitive machine half).
-PLATFORM_DIR_RE = re.compile(r"^[a-z][a-z0-9]*-[A-Za-z0-9_.]+$")
+def _version_tuple(text: str):
+    """``"0.4.0" -> (0, 4, 0)``; ``None`` if any segment is not a plain integer.
+
+    Deliberately not a PEP 440 parser — there is no packaging dependency in this
+    suite, and a version this cannot read simply opts out of the comparison it
+    feeds rather than failing it.
+    """
+    parts = text.split(".")
+    if not all(p.isdigit() for p in parts):
+        return None
+    return tuple(int(p) for p in parts)
 
 
 def test_every_golden_file_has_a_case():
@@ -166,41 +215,86 @@ def test_every_golden_file_has_a_case():
 def test_platform_golden_dirs_are_named_and_populated_correctly():
     """Every ``tests/goldens/<subdir>/`` is a well-formed platform override set.
 
-    Two rules, both cheap and both about files this platform may never read:
+    Three rules, all cheap, and all about files *this* platform may never read —
+    which is the point: a wrong linux override is invisible on arm64 until CI
+    goes red, so it gets policed everywhere.
 
-    * the directory name must parse as ``<sys.platform>-<machine>``, so a stray
+    * The directory name must parse as ``<sys.platform>-<machine>`` (the grammar
+      lives in ``regression_cases``, shared with the capture script), so a stray
       ``tests/goldens/old/`` cannot masquerade as a platform set that silently
-      never applies;
-    * its ``*.json`` names must be a **subset** of the case set — a subset, not a
+      never applies.
+    * Its ``*.json`` names must be a **subset** of the case set — a subset, not a
       bijection, because a platform set is allowed to override only the cases that
       actually drift there and inherit the rest from the canonical arm64 files.
-
-    Anything that is not a ``*.json`` in such a directory is an orphan too.
+      Anything that is not a ``*.json`` is an orphan too, dotfiles excepted:
+      committing a platform set from macOS plants a ``.DS_Store`` next to it, and
+      failing the suite over a Finder artefact would teach people to distrust it.
+    * An override must not be **older than the canonical it shadows**. Nothing
+      else links the two: re-freezing a canonical golden silently leaves every
+      committed override in place, still winning the lookup, still asserting
+      numbers from before the re-freeze. Compared on ``captured_utc`` (fixed-width
+      UTC, so lexicographic order is chronological) and on the recorded pyamares
+      version. Both are "not older", not "equal" — the canonical fit goldens still
+      carry 0.3.33 from the pre-fork capture, so demanding equality would condemn
+      every override captured since.
     """
     problems = []
     for entry in sorted(os.listdir(rc.GOLDENS_DIR)):
         path = os.path.join(rc.GOLDENS_DIR, entry)
         if not os.path.isdir(path):
             continue
-        if not PLATFORM_DIR_RE.match(entry):
+        if not rc.looks_like_platform_dir(entry):
             problems.append(
                 f"  {entry}/: not a '<sys.platform>-<machine>' directory name "
                 f"(this platform's key is {rc.platform_goldens_key()!r})"
             )
             continue
-        names = sorted(os.listdir(path))
+        names = sorted(n for n in os.listdir(path) if not n.startswith("."))
         stray = [n for n in names if not n.endswith(".json")]
         if stray:
             problems.append(f"  {entry}/: non-golden file(s) {stray}")
+        goldens = [n for n in names if n.endswith(".json")]
         orphans = sorted(
-            {os.path.splitext(n)[0] for n in names if n.endswith(".json")}
-            - set(rc.ALL_GOLDEN_NAMES)
+            {os.path.splitext(n)[0] for n in goldens} - set(rc.ALL_GOLDEN_NAMES)
         )
         if orphans:
             problems.append(f"  {entry}/: golden(s) with no case {orphans}")
+        for name in goldens:
+            canonical_path = os.path.join(rc.GOLDENS_DIR, name)
+            if not os.path.exists(canonical_path):
+                continue
+            with open(os.path.join(path, name), encoding="utf-8") as handle:
+                override_meta = json.load(handle).get("meta", {})
+            with open(canonical_path, encoding="utf-8") as handle:
+                canonical_meta = json.load(handle).get("meta", {})
+            problems.extend(
+                _stale_override_problems(entry, name, override_meta, canonical_meta)
+            )
     assert not problems, "malformed platform golden directories:\n" + "\n".join(
         problems
     )
+
+
+def _stale_override_problems(entry, name, override_meta, canonical_meta):
+    """Report an override golden that predates the canonical it shadows."""
+    problems = []
+    override_when = override_meta.get("captured_utc")
+    canonical_when = canonical_meta.get("captured_utc")
+    if override_when and canonical_when and override_when < canonical_when:
+        problems.append(
+            f"  {entry}/{name}: captured {override_when}, but the canonical it "
+            f"shadows was re-captured later ({canonical_when}) — re-capture the "
+            "override or drop it."
+        )
+    override_version = _version_tuple(override_meta.get("pyamares", ""))
+    canonical_version = _version_tuple(canonical_meta.get("pyamares", ""))
+    if override_version and canonical_version and override_version < canonical_version:
+        problems.append(
+            f"  {entry}/{name}: captured on pyamares "
+            f"{override_meta['pyamares']}, older than the canonical it shadows "
+            f"({canonical_meta['pyamares']}) — re-capture the override or drop it."
+        )
+    return problems
 
 
 @pytest.mark.parametrize("case_name", sorted(rc.GOLDEN_CASES))
@@ -527,32 +621,10 @@ def test_hsvd_vendored_backend_matches_golden():
         "meaningless, so it is not attempted."
     )
 
-    tol = golden["tolerances"]
-    per_field = tol.get("per_field", {})
-
-    def tolerances_for(field):
-        entry = per_field.get(field, {})
-        return (
-            entry.get("rtol", tol["default_rtol"]),
-            entry.get("atol", tol["default_atol"]),
-        )
-
-    mismatches = []
-
-    def check(label, field, expected, actual):
-        rtol, atol = tolerances_for(field)
-        if np.isclose(actual, expected, rtol=rtol, atol=atol, equal_nan=True):
-            return
-        rel = abs(actual - expected) / abs(expected) if expected else float("nan")
-        mismatches.append(
-            f"  {label:28s} expected {expected!r} got {actual!r} "
-            f"(rel {rel:.3e}, abs {abs(actual - expected):.3e}, "
-            f"rtol {rtol:.1e} atol {atol:.1e})"
-        )
-
+    comparer = GoldenComparer(golden["tolerances"])
     for row, expected_row in enumerate(golden["components"]):
         for field in rc.HSVD_COMPONENT_FIELDS:
-            check(
+            comparer.check(
                 f"component[{row}].{field}",
                 field,
                 float(expected_row[field]),
@@ -566,8 +638,11 @@ def test_hsvd_vendored_backend_matches_golden():
         f"{len(expected_sv)} frozen"
     )
     for i, (expected, actual) in enumerate(zip(expected_sv, actual_sv)):
-        check(f"singular_value[{i}]", "top_singular_values", expected, float(actual))
+        comparer.check(
+            f"singular_value[{i}]", "top_singular_values", expected, float(actual)
+        )
 
+    mismatches = comparer.mismatches
     assert not mismatches, (
         f"{rc.HSVD_VENDORED_CASE}: {len(mismatches)} frozen value(s) drifted against "
         f"{source} (captured on {golden['meta']['python']}/"

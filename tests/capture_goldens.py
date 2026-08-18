@@ -91,7 +91,11 @@ DEFAULT_TOLERANCES = {
 HSVD_TOLERANCES = {
     "default_rtol": 1e-9,
     "default_atol": 0.0,
-    "per_field": {
+    # ``per_column`` even though this payload calls them fields: one tolerance
+    # schema for every golden family, so ``test_regression.py`` resolves both with
+    # the same helper. The frozen fit goldens already spell it this way and cannot
+    # be edited, so this is the name that had to win.
+    "per_column": {
         # One component sits at -0.0135 Hz, so a relative tolerance says nothing
         # about it; the floor is what actually guards that cell.
         "frequency_hz": {"atol": 1e-9},
@@ -195,8 +199,14 @@ def hsvd_golden_payload(case_name: str, result: dict) -> dict:
         "meta": meta,
         "nsv_found": int(result["nsv_found"]),
         "component_fields": list(rc.HSVD_COMPONENT_FIELDS),
+        # Built from the declared field list, not from the DataFrame's columns: a
+        # column the runner grows later would otherwise be frozen here and never
+        # compared, since the test iterates HSVD_COMPONENT_FIELDS.
         "components": [
-            {field: float(components.at[row, field]) for field in components.columns}
+            {
+                field: float(components.at[row, field])
+                for field in rc.HSVD_COMPONENT_FIELDS
+            }
             for row in components.index
         ],
         "top_singular_values": [float(x) for x in result["top_singular_values"]],
@@ -205,15 +215,31 @@ def hsvd_golden_payload(case_name: str, result: dict) -> dict:
     }
 
 
-#: Every case name in a deterministic capture order.
-CASE_ORDER = list(rc.GOLDEN_CASES) + [rc.HSVD_VENDORED_CASE]
+def _result_multiplets_payload(case_name: str, fidobj) -> dict:
+    """Adapter: a fit runner returns the FID object, not the table."""
+    return golden_payload(case_name, fidobj.result_multiplets)
+
+
+#: Payload kind -> builder, the one thing ``capture_goldens.py`` adds to the case
+#: registry in ``regression_cases``. Looked up by name so a case declaring a kind
+#: nobody can serialise fails loudly at capture time instead of silently.
+PAYLOAD_BUILDERS = {
+    rc.KIND_RESULT_MULTIPLETS: _result_multiplets_payload,
+    rc.KIND_HSVD_COMPONENTS: hsvd_golden_payload,
+}
 
 
 def capture_case(case_name: str) -> dict:
     """Run one case and return its golden payload, whatever its payload shape."""
-    if case_name == rc.HSVD_VENDORED_CASE:
-        return hsvd_golden_payload(case_name, rc.run_hsvd_vendored_backend_case())
-    return golden_payload(case_name, rc.GOLDEN_CASES[case_name]().result_multiplets)
+    kind, runner = rc.GOLDEN_CASE_REGISTRY[case_name]
+    try:
+        build = PAYLOAD_BUILDERS[kind]
+    except KeyError:
+        raise RuntimeError(
+            f"{case_name}: payload kind {kind!r} has no builder in "
+            f"capture_goldens.PAYLOAD_BUILDERS (known: {sorted(PAYLOAD_BUILDERS)})"
+        ) from None
+    return build(case_name, runner())
 
 
 def payload_size(payload: dict) -> str:
@@ -261,9 +287,33 @@ def main(argv=None) -> int:
         parser.error(
             f"unknown case(s) {unknown!r}; known cases: {sorted(rc.ALL_GOLDEN_NAMES)}"
         )
-    case_names = [n for n in CASE_ORDER if not args.only or n in args.only]
+    case_names = [n for n in rc.CASE_ORDER if not args.only or n in args.only]
+    if not case_names:
+        # Unreachable while --only is validated against the same registry the
+        # order comes from. Kept as the belt to that braces: a selection that
+        # writes nothing must never look like a successful capture.
+        parser.error(
+            f"no cases selected; --only {args.only!r} matched none of {rc.CASE_ORDER}"
+        )
 
     outdir = os.path.abspath(args.write)
+
+    # A platform golden set is only meaningful if the numbers in it came from
+    # that platform. Refuse to fill someone else's directory — an arm64 laptop
+    # writing into linux-x86_64/ would freeze the wrong BLAS's output under a
+    # name the test suite trusts on ubuntu. Writing the canonical set (a
+    # directory whose name is not platform-shaped, i.e. tests/goldens/ itself, or
+    # any scratch path) stays allowed: that set is deliberately one platform's
+    # numbers serving every platform.
+    basename = os.path.basename(outdir)
+    if rc.looks_like_platform_dir(basename) and basename != rc.platform_goldens_key():
+        parser.error(
+            f"--write {args.write!r} targets the platform golden set {basename!r}, "
+            f"but this host is {rc.platform_goldens_key()!r}. Capture a platform "
+            "set on its own platform (see .github/workflows/capture-goldens.yml), "
+            "or write to a directory that is not named after a platform."
+        )
+
     os.makedirs(outdir, exist_ok=True)
 
     targets = {name: os.path.join(outdir, f"{name}.json") for name in case_names}
