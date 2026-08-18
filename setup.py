@@ -56,10 +56,36 @@ class CustomSDist(_sdist):
         _sdist.run(self)
 
 
-jupyter_requirements = [
-    "ipykernel",
-    "notebook",
+# MATLAB v7.3 (HDF5) .mat reading -- fileio/readmat.py::readmrs and
+# fileio/readfidall.py::read_fidall import mat73 inside the v7.3 branch only.
+matlab_requirements = [
+    "mat73",
 ]
+
+# Excel prior knowledge -- kernel/PriorKnowledge.py hands .xlsx/.xls to
+# pandas.read_excel, which needs openpyxl (.xlsx) or xlrd (legacy .xls).
+excel_requirements = [
+    "openpyxl",
+    "xlrd",
+]
+
+# Everything the example notebooks and the interactive workflows need. Plain
+# list concatenation rather than self-referential extras, so the metadata stays
+# readable on old pip/setuptools: `pip install 'pyamares-xmris[jupyter]'`
+# reproduces the pre-0.5.0 install (minus the dead hlsvdpro), plus notebook and
+# openpyxl. See D18.
+jupyter_requirements = (
+    [
+        "notebook",
+        "ipykernel",
+        "ipython",
+        "ipywidgets>=7.6.0,<8.0.0;python_version<'3.11'",  # For older Python versions
+        "ipywidgets>=8.0.0;python_version>='3.11'",  # For newer Python versions
+        "requests",
+    ]
+    + matlab_requirements
+    + excel_requirements
+)
 
 doc_requirements = [
     "sphinx",
@@ -77,32 +103,22 @@ ruff_requirements = [
 ]
 
 
+# What the fitting engine itself imports. Everything else -- the Jupyter stack,
+# the HTTP client, the optional file readers -- lives behind an extra (D18).
 install_requires = [
+    "numpy>=1.18.1",
+    "scipy>=1.2.1",
     "pandas>=1.1.0",
     "matplotlib>=3.1.3",
     "lmfit",
-    "numpy>=1.18.1",
-    "scipy>=1.2.1",
     "sympy",
     # 0.12 replaced np.dtype('a8') with np.dtype('S8'); anything older fails to
     # import under numpy 2. The floor is still required after D17 made the import
     # lazy -- laziness only moves the failure from `import pyAMARES` to the first
     # ng.proc_base call, which is harder to diagnose, not less fatal. See D16.
     "nmrglue>=0.12",
-    "xlrd",
     "jinja2",
     "tqdm",
-    "mat73",
-    "ipython",
-    "ipykernel",
-    "requests",
-    "ipywidgets>=7.6.0,<8.0.0;python_version<'3.11'",  # For older Python versions
-    "ipywidgets>=8.0.0;python_version>='3.11'",  # For newer Python versions
-    # Use the better-performing 'hlsvdpro' package if running on supported platforms
-    # (e.g., x86_64 or amd64 architectures). Otherwise, fall back to the custom
-    # 'hlsvdpropy' implementation located in pyAMARES/libs/hlsvd.py.
-    # (Refactored to PEP 508 markers in Issue #15 for Apple Silicon/uv compatibility)
-    "hlsvdpro>=2.0.0; platform_machine == 'x86_64' or platform_machine == 'amd64'",
 ]
 
 
@@ -150,8 +166,10 @@ setup(
     python_requires=">=3.8",
     install_requires=install_requires,
     extras_require={
-        "docs": doc_requirements,
+        "matlab": matlab_requirements,
+        "excel": excel_requirements,
         "jupyter": jupyter_requirements,
+        "docs": doc_requirements,
         "ruff": ruff_requirements,
         "dev": jupyter_requirements + doc_requirements + ruff_requirements,
     },
