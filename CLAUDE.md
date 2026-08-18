@@ -27,6 +27,12 @@ packaging metadata and, from 0.4.0 on, targeted source fixes.
   plus `uv pip install --no-deps -e .`.
 - Version single source of truth: `pyAMARES/__init__.py` (`__version__`), AST-parsed by
   `setup.py`.
+- Since D18 `install_requires` is only what the package imports — numpy, scipy, pandas,
+  matplotlib, lmfit, sympy, nmrglue, jinja2, tqdm. Everything else is an extra: `matlab`
+  (mat73, v7.3 `.mat`), `excel` (openpyxl + xlrd, spreadsheet priors), `jupyter`
+  (notebook/ipykernel/ipython/ipywidgets/requests + matlab + excel), plus `docs`, `ruff`,
+  `dev`. Install with `.[jupyter]` for anything notebook-shaped; a bare install must stay
+  bare — `.github/workflows/test-install.yml` asserts it.
 - Lint: `ruff check .` and `ruff format --check .` (line length 88; `pyAMARES/libs/hlsvd.py`
   is excluded as vendored third-party code).
 
@@ -63,10 +69,12 @@ do not rename any of them without a coordinated xmris release.
   (`test_no_undocumented_module_level_third_party_imports`, allow-list
   numpy/scipy/pandas/lmfit/jinja2 plus documented per-file exceptions). Put a new heavy
   import in a function body, not at module level. numpy 2 requires `nmrglue>=0.12`.
-- `hlsvdpro` is optional by design: `util/hsvd.py` never imports it under numpy ≥2 (the
-  vendored pure-Python `pyAMARES/libs/hlsvd.py` is used), and falls back to the vendored copy
-  when it is absent under numpy 1.x. Its PEP 508 marker restricts it to x86_64/amd64 — it
-  ships no arm64 wheel and no sdist.
+- `hlsvdpro` is **not installed at all** since D18 — it is declared neither in
+  `install_requires` nor in any extra. It is dead weight everywhere: it cannot import under
+  setuptools ≥82 (module-scope `import pkg_resources`), and `util/hsvd.py` never imports it
+  under numpy ≥2. The vendored pure-Python `pyAMARES/libs/hlsvd.py` is the live backend on
+  every stack. `util/hsvd.py` is untouched and still binds a *user*-installed hlsvdpro under
+  numpy 1.x — don't "clean up" that try/except.
 - The `sd`, `sd(ppm)`, `sd(Hz)`, `sd(deg)` result columns are **not reproducible across
   dependency stacks** (ill-conditioned Fisher matrix through `pinv`/`lstsq`; up to ~238%
   spread observed). They are guarded structurally only, never golden-compared. Fitted
