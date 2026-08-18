@@ -256,7 +256,10 @@ compatibility matrix at the end for the post-D16 resolutions.
     Symptom:   the documented "reorder to the prior-knowledge peak order" never
                happened: the reindex return value was discarded
     Cause:     `result.reindex(fid_parameters.peaklist)` called for effect
-    Change:    bind the result, but only when set(peaklist) == set(result.index)
+    Change:    bind the result, but only when set(peaklist) == set(result.index);
+               the divergent-set branch logs an info-level message naming both
+               label sets (part of the shipped patch from the start; this line
+               recorded it retroactively in 0.5.0)
     Rationale: binding it unconditionally is destructive on a divergent label
                set — it drops every fitted peak absent from peaklist and injects
                an all-NaN row per unfitted prior name. Two supported workflows
@@ -340,6 +343,23 @@ compatibility matrix at the end for the post-D16 resolutions.
                / pandas 2.1.4, i.e. dropping the ceilings did not raise a floor.
     Resolves:  C1, C4; completes C2
 
+## D21 — `uninterleave`'s error message carries the offending shape
+
+    Status:    shipped in 0.4.0 — entry added retroactively in 0.5.0. The fix
+               went out in 0.4.0 under commit ff3b739 with no ledger entry
+               (treated as a lint fix at the time); it does change error-path
+               behaviour, so it belongs here. Numbering reflects when it was
+               recorded, not when it shipped.
+    Symptom:   passing a >=3-D array to uninterleave raised
+               TypeError: not all arguments converted during string formatting
+               instead of the intended message
+    Cause:     the raise carried a %-format string with zero placeholders
+               (`"This function requires 1D or 2D array!" % fid.shape`) —
+               flake8/ruff F507
+    Change:    "This function requires 1D or 2D array, got shape %s!" % (fid.shape,)
+    Behaviour: error path only; a TypeError is still raised, now with the
+               intended text and the offending shape
+
 ## Considered and deliberately not changed
 
 `kernel/lmfit.py: load_parameter_from_csv` — `df.where(pd.notnull(df), None)` was
@@ -354,11 +374,11 @@ recording this was added.
 
 ---
 
-# D — Divergences (staged for 0.5.0)
+# D — Divergences (shipped in 0.5.0)
 
 ## D17 — the heavy imports are deferred to first use
 
-    Status:    staged for 0.5.0 (unreleased)
+    Status:    shipped in 0.5.0
     Symptom:   `import pyAMARES` eagerly loaded nmrglue, matplotlib.pyplot and
                mat73. Two costs. An import failure in any of them was fatal to
                the whole package rather than to the one function that needs it —
@@ -470,7 +490,7 @@ recording this was added.
 
 ## D18 — the runtime dependency list is slimmed to what the package imports
 
-    Status:    staged for 0.5.0 (unreleased)
+    Status:    shipped in 0.5.0
     Symptom:   `pip install pyamares-xmris` resolved 62 packages on py3.13 for a
                library whose own imports are numpy/scipy/pandas/matplotlib/
                lmfit/sympy/nmrglue. A Jupyter stack (ipython, ipykernel, the two
@@ -618,7 +638,7 @@ recording this was added.
 
 ## D19 — distribution metadata moves to `pyproject.toml` (PEP 621)
 
-    Status:    staged for 0.5.0 (unreleased)
+    Status:    shipped in 0.5.0
     Symptom:   the project carried two build files, with the wrong one
                authoritative: setup.py held every metadata field while
                pyproject.toml held only [build-system] and [tool.ruff]. Anything
@@ -771,7 +791,7 @@ recording this was added.
 
 ## D20 — `parameters_to_dataframe_result` builds its frame once
 
-    Status:    staged for 0.5.0 (unreleased)
+    Status:    shipped in 0.5.0
     Symptom:   none visible in output; the cost is quadratic work, not a wrong
                answer
     Cause:     in kernel/lmfit.py, `df = pd.DataFrame(data)` sat inside the
@@ -957,9 +977,10 @@ Not commitments. Recorded so the cost is known when the question comes up.
 
 # Compatibility matrix
 
-The 53-test regression corpus (`tests/test_regression.py` + `tests/test_api_surface.py`),
-verified 2026-08-18 on macOS arm64. "Resolved" rows are what `pip install pyamares-xmris`
-actually produces on that Python after D16 — nothing is pinned.
+**As verified for the 0.4.0 release** (2026-08-18, macOS arm64), when the corpus held 53
+tests — the corpus has grown since and its count is a moving number, so rows say "green"
+about the corpus of that date. "Resolved" rows are what `pip install pyamares-xmris`
+produced on that Python after D16 — nothing is pinned.
 
 | Python | numpy | pandas | scipy | nmrglue | How reached | Result |
 |---|---|---|---|---|---|---|
@@ -984,3 +1005,26 @@ structurally rather than frozen.
 This is no longer one example fit. `tests/` is a regression suite whose goldens are frozen on
 the 0.3.33 stack (row 3), so a row being green means the fitted output is the shipped output —
 not merely that the fit converged.
+
+## 0.5.0 verification
+
+The 0.5.0 release (D17–D20) re-verified the grown corpus rather than the table above:
+
+- Every CI leg is green on the release tip — the five regression legs (the golden stack,
+  pandas 2.2 and pandas 3 under numpy 1.26.4/2.5.2 on ubuntu, plus unpinned macOS arm64),
+  the 15-leg install matrix (3 OSes × py3.8/3.10/3.12/3.13/3.14, now asserting the bare
+  install stays bare and lazy), the `[jupyter]` extras legs, the notebook suite on
+  py3.8–3.14, and the new `uv build` + `twine check` job.
+- Local scratch-venv runs: the golden stack (py3.12 / numpy 1.26.4 / pandas 2.1.4 /
+  scipy 1.17.1), unpinned py3.13 (numpy 2.5.2 / pandas 3.0.5 / scipy 1.18.0), and
+  py3.8 at the floor (numpy 1.24.4 / pandas 2.0.3) — all green; py3.8/3.9 skip only
+  version-gated guard tests (`sys.stdlib_module_names`, `tomllib`).
+- Goldens are now **platform-matched**: the canonical arm64 set (frozen, 0.3.33 stack)
+  is byte-identical to 0.4.0's, and linux legs compare against the reviewed
+  `tests/goldens/linux-x86_64/` capture (same golden stack, ubuntu). The canonical
+  `example_readme` tolerance is back at the tight defaults; only the linux override of
+  that one case carries a measured 5e-3 (pandas 2.2.x excites its soft modes at
+  ~2.5e-3 on that platform — documented in the file). The vendored-HSVD golden holds
+  rtol 1e-9 everywhere.
+- None of D17–D20 is a numeric change: the frozen goldens are byte-identical before
+  and after each of them.
