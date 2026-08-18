@@ -129,8 +129,159 @@ class GoldenComparer:
             f"rtol {rtol:.1e} atol {atol:.1e})"
         )
 
+    def assert_no_mismatches(
+        self, case_name, source, meta, noun="golden cell(s)", stack=("numpy", "pandas")
+    ):
+        """Raise the drift summary if anything was recorded.
 
-@pytest.mark.parametrize("case_name", sorted(rc.GOLDEN_CASES))
+        The summary names the case, the file compared, the stack the golden was
+        captured on and the stack running now — a red CI leg has to answer "which
+        goldens, captured where, running on what" from the message alone, without
+        anyone opening the JSON. Both golden families used to hand-format this
+        template separately; they differed only in the noun and in which stack
+        component was worth naming (``pandas`` for a fit, ``scipy`` for a
+        decomposition), which is what the two arguments carry.
+        """
+        if not self.mismatches:
+            return
+        captured = "/".join(
+            [meta["python"]] + [f"{f} {meta[f]}" for f in stack] + [meta["machine"]]
+        )
+        raise AssertionError(
+            f"{case_name}: {len(self.mismatches)} {noun} drifted against {source} "
+            f"(captured on {captured}, running on numpy {np.__version__}/"
+            f"{rc.platform_goldens_key()}):\n" + "\n".join(self.mismatches)
+        )
+
+
+def _tolerance_block_problems(label: str, tolerances) -> list:
+    """Structural checks on a golden's tolerance block.
+
+    Not the *values* — those are a deliberate per-golden decision and CLAUDE.md
+    documents loosening one as a data-only edit inside the JSON. This is the
+    schema only: the keys ``GoldenComparer`` reads have to be the keys that are
+    there, or an override silently falls back to the default it meant to widen.
+    ``per_field`` was exactly that bug before the two comparison loops were
+    merged.
+    """
+    problems = []
+    if not isinstance(tolerances, dict):
+        return [f"  {label}: 'tolerances' is {type(tolerances).__name__}, not a dict"]
+    if "default_rtol" not in tolerances:
+        problems.append(f"  {label}: 'tolerances' has no 'default_rtol'")
+    unknown = sorted(
+        set(tolerances) - {"default_rtol", "default_atol", "per_column", "comment"}
+    )
+    if unknown:
+        problems.append(
+            f"  {label}: unknown key(s) {unknown} in 'tolerances' — per-cell "
+            "overrides live under 'per_column', and a misspelt key is silently "
+            "ignored by the comparer"
+        )
+    per_column = tolerances.get("per_column", {})
+    if not isinstance(per_column, dict):
+        problems.append(f"  {label}: 'per_column' is not a dict")
+        return problems
+    for column, override in per_column.items():
+        if not isinstance(override, dict) or set(override) - {"rtol", "atol"}:
+            problems.append(
+                f"  {label}: 'per_column'[{column!r}] is {override!r}; expected a "
+                "dict of 'rtol' and/or 'atol'"
+            )
+    return problems
+
+
+def _fit_golden_problems(label: str, golden: dict) -> list:
+    """Everything checkable about a ``result_multiplets`` golden without running it."""
+    problems = []
+    values = golden.get("values")
+    if not isinstance(values, dict):
+        return [f"  {label}: no 'values' mapping"]
+    if set(values) != set(rc.GOLDEN_COLUMNS):
+        problems.append(
+            f"  {label}: freezes {sorted(values)} but "
+            f"regression_cases.GOLDEN_COLUMNS says {sorted(rc.GOLDEN_COLUMNS)}"
+        )
+    leaked = sorted(set(values) & set(rc.STRUCTURAL_COLUMNS))
+    if leaked:
+        problems.append(
+            f"  {label}: sd column(s) {leaked} were frozen. They are not "
+            "reproducible across dependency stacks — guard them structurally."
+        )
+    if golden.get("columns_exact_order") != rc.RESULT_MULTIPLETS_COLUMNS:
+        problems.append(
+            f"  {label}: 'columns_exact_order' disagrees with "
+            "regression_cases.RESULT_MULTIPLETS_COLUMNS"
+        )
+    index = golden.get("index")
+    if not index:
+        problems.append(f"  {label}: empty or missing 'index'")
+    else:
+        for column, cells in values.items():
+            if sorted(cells) != sorted(index):
+                problems.append(
+                    f"  {label}: 'values'[{column!r}] covers {sorted(cells)}, "
+                    f"but 'index' is {sorted(index)}"
+                )
+                break
+    return problems
+
+
+def _hsvd_golden_problems(label: str, golden: dict) -> list:
+    """Everything checkable about an HSVD golden without running it."""
+    problems = []
+    if golden.get("component_fields") != list(rc.HSVD_COMPONENT_FIELDS):
+        problems.append(
+            f"  {label}: 'component_fields' is {golden.get('component_fields')!r} "
+            f"but regression_cases.HSVD_COMPONENT_FIELDS says "
+            f"{list(rc.HSVD_COMPONENT_FIELDS)}"
+        )
+    components = golden.get("components")
+    if not isinstance(components, list) or not components:
+        problems.append(f"  {label}: empty or missing 'components'")
+    else:
+        for row, component in enumerate(components):
+            if set(component) != set(rc.HSVD_COMPONENT_FIELDS):
+                problems.append(
+                    f"  {label}: 'components'[{row}] carries {sorted(component)}, "
+                    f"expected {sorted(rc.HSVD_COMPONENT_FIELDS)}"
+                )
+                break
+    if not isinstance(golden.get("nsv_found"), int):
+        problems.append(f"  {label}: 'nsv_found' is not an int")
+    singular = golden.get("top_singular_values")
+    if not isinstance(singular, list) or not singular:
+        problems.append(f"  {label}: empty or missing 'top_singular_values'")
+    if not golden.get("comment"):
+        problems.append(
+            f"  {label}: no 'comment' — an HSVD golden records the measurement "
+            "its tolerances came from"
+        )
+    return problems
+
+
+#: Payload kind -> the structural validator for that shape. Same dispatch idea as
+#: ``capture_goldens.PAYLOAD_HANDLERS``, and the reason a golden can be policed
+#: on a platform that could never run its case: shape, schema and the
+#: never-freeze-sd rule need no fit, only the file.
+STRUCTURE_VALIDATORS = {
+    rc.KIND_RESULT_MULTIPLETS: _fit_golden_problems,
+    rc.KIND_HSVD_COMPONENTS: _hsvd_golden_problems,
+}
+
+
+def golden_structure_problems(case_name: str, label: str, golden: dict) -> list:
+    """Validate one golden's structure against the live constants."""
+    kind = rc.GOLDEN_CASE_REGISTRY[case_name].kind
+    validate = STRUCTURE_VALIDATORS[kind]
+    return validate(label, golden) + _tolerance_block_problems(
+        label, golden.get("tolerances")
+    )
+
+
+@pytest.mark.parametrize(
+    "case_name", sorted(rc.case_names_of_kind(rc.KIND_RESULT_MULTIPLETS))
+)
 def test_golden_result_multiplets(case_name):
     """Every golden cell of ``result_multiplets`` still matches the frozen value.
 
@@ -139,22 +290,19 @@ def test_golden_result_multiplets(case_name):
     """
     golden = load_golden(case_name)
     source = golden["_source_path"]
+
+    # Structure first, before the fit runs. Guard the golden against the *live*
+    # constants, not against its own copies of them (both sides of a JSON-vs-JSON
+    # comparison were written by the same capture run, so it can never fail). If
+    # someone edits GOLDEN_COLUMNS or RESULT_MULTIPLETS_COLUMNS without
+    # re-capturing, this catches it — as does the same validator run over every
+    # platform override, on every platform. Ordering matters: a golden that froze
+    # an sd column is a fact about the file, so it must be reportable even when
+    # the fit below is what is broken.
+    problems = golden_structure_problems(case_name, source, golden)
+    assert not problems, "malformed golden:\n" + "\n".join(problems)
+
     df = rc.golden_case_result(case_name).result_multiplets
-
-    # Guard the golden against the *live* constants, not against its own copies of
-    # them (both sides of a JSON-vs-JSON comparison were written by the same
-    # capture run, so it can never fail). If someone edits GOLDEN_COLUMNS or
-    # RESULT_MULTIPLETS_COLUMNS without re-capturing, these two lines catch it.
-    assert set(golden["values"]) == set(rc.GOLDEN_COLUMNS), (
-        f"{source}: the golden freezes {sorted(golden['values'])} but "
-        f"regression_cases.GOLDEN_COLUMNS says {sorted(rc.GOLDEN_COLUMNS)} — "
-        "re-capture the goldens."
-    )
-    assert golden["columns_exact_order"] == rc.RESULT_MULTIPLETS_COLUMNS, (
-        f"{source}: the golden's column order disagrees with "
-        "regression_cases.RESULT_MULTIPLETS_COLUMNS — re-capture the goldens."
-    )
-
     assert [str(x) for x in df.index] == golden["index"], (
         f"{source}: the metabolite row index changed.\n"
         f"  expected: {golden['index']}\n"
@@ -176,14 +324,7 @@ def test_golden_result_multiplets(case_name):
                 float(df.at[metabolite, column]),
             )
 
-    mismatches = comparer.mismatches
-    assert not mismatches, (
-        f"{case_name}: {len(mismatches)} golden cell(s) drifted against {source} "
-        f"(captured on {golden['meta']['python']}/"
-        f"numpy {golden['meta']['numpy']}/pandas {golden['meta']['pandas']}/"
-        f"{golden['meta']['machine']}, running on numpy {np.__version__}/"
-        f"{rc.platform_goldens_key()}):\n" + "\n".join(mismatches)
-    )
+    comparer.assert_no_mismatches(case_name, source, golden["meta"])
 
 
 def _version_tuple(text: str):
@@ -215,9 +356,11 @@ def test_every_golden_file_has_a_case():
 def test_platform_golden_dirs_are_named_and_populated_correctly():
     """Every ``tests/goldens/<subdir>/`` is a well-formed platform override set.
 
-    Three rules, all cheap, and all about files *this* platform may never read —
-    which is the point: a wrong linux override is invisible on arm64 until CI
+    All of this is about files *this* platform may never read — which is the
+    point: a malformed linux override is invisible on arm64 until an ubuntu leg
     goes red, so it gets policed everywhere.
+
+    Policed off-platform (everything that needs only the file):
 
     * The directory name must parse as ``<sys.platform>-<machine>`` (the grammar
       lives in ``regression_cases``, shared with the capture script), so a stray
@@ -237,6 +380,17 @@ def test_platform_golden_dirs_are_named_and_populated_correctly():
       version. Both are "not older", not "equal" — the canonical fit goldens still
       carry 0.3.33 from the pre-fork capture, so demanding equality would condemn
       every override captured since.
+    * Its **content** must be structurally valid against the live constants — the
+      same validator the on-platform comparison tests run, covering the frozen
+      column/field set, the payload shape, the tolerance schema and the
+      never-freeze-the-sd-columns rule. A linux override that froze an ``sd``
+      column, or spelled its overrides ``per_field``, used to be reviewable only
+      by eye and only on linux.
+
+    **Not** policed off-platform: the numbers. Comparing a frozen value means
+    running its case, and a linux override's values are wrong here by
+    construction — that is why the file exists. Those are checked by the
+    comparison tests, on the platform the override belongs to.
     """
     problems = []
     for entry in sorted(os.listdir(rc.GOLDENS_DIR)):
@@ -246,7 +400,10 @@ def test_platform_golden_dirs_are_named_and_populated_correctly():
         if not rc.looks_like_platform_dir(entry):
             problems.append(
                 f"  {entry}/: not a '<sys.platform>-<machine>' directory name "
-                f"(this platform's key is {rc.platform_goldens_key()!r})"
+                f"(this platform's key is {rc.platform_goldens_key()!r}; the "
+                f"first component must be one of "
+                f"regression_cases.PLATFORM_PREFIXES, "
+                f"{', '.join(sorted(rc.PLATFORM_PREFIXES))})"
             )
             continue
         names = sorted(n for n in os.listdir(path) if not n.startswith("."))
@@ -260,15 +417,23 @@ def test_platform_golden_dirs_are_named_and_populated_correctly():
         if orphans:
             problems.append(f"  {entry}/: golden(s) with no case {orphans}")
         for name in goldens:
+            case_name = os.path.splitext(name)[0]
+            if case_name not in rc.ALL_GOLDEN_NAMES:
+                continue  # already reported as an orphan; nothing to validate against
+            with open(os.path.join(path, name), encoding="utf-8") as handle:
+                override = json.load(handle)
+            problems.extend(
+                golden_structure_problems(case_name, f"{entry}/{name}", override)
+            )
             canonical_path = os.path.join(rc.GOLDENS_DIR, name)
             if not os.path.exists(canonical_path):
                 continue
-            with open(os.path.join(path, name), encoding="utf-8") as handle:
-                override_meta = json.load(handle).get("meta", {})
             with open(canonical_path, encoding="utf-8") as handle:
                 canonical_meta = json.load(handle).get("meta", {})
             problems.extend(
-                _stale_override_problems(entry, name, override_meta, canonical_meta)
+                _stale_override_problems(
+                    entry, name, override.get("meta", {}), canonical_meta
+                )
             )
     assert not problems, "malformed platform golden directories:\n" + "\n".join(
         problems
@@ -297,19 +462,13 @@ def _stale_override_problems(entry, name, override_meta, canonical_meta):
     return problems
 
 
-@pytest.mark.parametrize("case_name", sorted(rc.GOLDEN_CASES))
-def test_goldens_never_freeze_the_sd_columns(case_name):
-    """A re-capture must not quietly start freezing the non-reproducible sd columns."""
-    golden = load_golden(case_name)
-    frozen = set(golden["values"])
-    leaked = frozen & set(rc.STRUCTURAL_COLUMNS)
-    assert not leaked, (
-        f"{case_name}: sd column(s) {sorted(leaked)} were golden-compared. They are "
-        "not reproducible across dependency stacks — guard them structurally instead."
-    )
-    # Against the live constant, never against the golden's own copy of it — a
-    # JSON-vs-JSON comparison was written by one capture run and cannot fail.
-    assert frozen == set(rc.GOLDEN_COLUMNS)
+# The dedicated `test_goldens_never_freeze_the_sd_columns` that used to sit here
+# is gone, not weakened: its rule ("a re-capture must not quietly start freezing
+# the non-reproducible sd columns") now lives in `_fit_golden_problems`, which
+# `test_golden_result_multiplets` runs over the resolved golden of every fit case
+# *and* `test_platform_golden_dirs_are_named_and_populated_correctly` runs over
+# every platform override, on every platform. One implementation, strictly more
+# files covered.
 
 
 # --------------------------------------------------------------------------------
@@ -584,39 +743,47 @@ def test_hsvd_backend_selection():
 
 
 # --------------------------------------------------------------------------------
-# Case D — the vendored HSVD backend, frozen
+# Case D — HSVD decompositions, frozen
 # --------------------------------------------------------------------------------
 
+#: Every registry case whose golden freezes a decomposition. Parametrized over,
+#: not named: this test used to hardcode the one case that existed, so a second
+#: entry of the same kind would have been captured, policed structurally, and
+#: never numerically compared.
+HSVD_GOLDEN_CASES = rc.case_names_of_kind(rc.KIND_HSVD_COMPONENTS)
 
-def test_hsvd_vendored_backend_matches_golden():
-    """The vendored pure-Python HSVD decomposition still returns the frozen numbers.
 
-    Unlike the structural Case C tests above, this one *does* freeze values — but
-    of ``pyAMARES.libs.hlsvd.hlsvd`` called directly, so "the two backends differ
-    by design" never applies: whichever backend ``util/hsvd.py`` happens to bind,
-    this test measures the vendored one.
+@pytest.mark.parametrize("case_name", sorted(HSVD_GOLDEN_CASES))
+def test_hsvd_components_match_golden(case_name):
+    """An HSVD decomposition still returns the frozen numbers.
 
-    Tolerances live in the golden and were measured across dependency stacks and
-    platforms; the golden's ``comment`` records the numbers.
+    Unlike the structural Case C tests above, this one *does* freeze values — and
+    for the vendored case it calls ``pyAMARES.libs.hlsvd.hlsvd`` directly, so "the
+    two backends differ by design" never applies: whichever backend
+    ``util/hsvd.py`` happens to bind, this measures the vendored one.
+
+    Tolerances live in the golden, having come from its registry entry, and were
+    measured across dependency stacks and platforms; the golden's ``comment``
+    records the numbers.
     """
-    golden = load_golden(rc.HSVD_VENDORED_CASE)
+    golden = load_golden(case_name)
     source = golden["_source_path"]
-    result = rc.run_hsvd_vendored_backend_case()
 
-    # Against the live constant, never against the golden's copy of it.
-    assert golden["component_fields"] == list(rc.HSVD_COMPONENT_FIELDS), (
-        f"{source}: the golden freezes {golden['component_fields']} but "
-        f"regression_cases.HSVD_COMPONENT_FIELDS says "
-        f"{list(rc.HSVD_COMPONENT_FIELDS)} — re-capture the golden."
-    )
+    # Structure first, before the decomposition runs — against the live constants,
+    # never against the golden's copies of them. A schema violation is a fact about
+    # the file and stays reportable even when the runner is what is broken.
+    problems = golden_structure_problems(case_name, source, golden)
+    assert not problems, "malformed golden:\n" + "\n".join(problems)
+
+    result = rc.golden_case_result(case_name)
     assert result["nsv_found"] == golden["nsv_found"], (
-        f"{source}: the vendored HSVD backend found {result['nsv_found']} singular "
+        f"{source}: the HSVD backend found {result['nsv_found']} singular "
         f"value(s), the golden froze {golden['nsv_found']}"
     )
 
     components = result["components"]
     assert len(components) == len(golden["components"]), (
-        f"{source}: the backend returned {len(components)} component(s), the golden "
+        f"{source}: the runner returned {len(components)} component(s), the golden "
         f"froze {len(golden['components'])} — the rest of the comparison is "
         "meaningless, so it is not attempted."
     )
@@ -642,13 +809,12 @@ def test_hsvd_vendored_backend_matches_golden():
             f"singular_value[{i}]", "top_singular_values", expected, float(actual)
         )
 
-    mismatches = comparer.mismatches
-    assert not mismatches, (
-        f"{rc.HSVD_VENDORED_CASE}: {len(mismatches)} frozen value(s) drifted against "
-        f"{source} (captured on {golden['meta']['python']}/"
-        f"numpy {golden['meta']['numpy']}/scipy {golden['meta']['scipy']}/"
-        f"{golden['meta']['machine']}, running on numpy {np.__version__}/"
-        f"{rc.platform_goldens_key()}):\n" + "\n".join(mismatches)
+    comparer.assert_no_mismatches(
+        case_name,
+        source,
+        golden["meta"],
+        noun="frozen value(s)",
+        stack=("numpy", "scipy"),
     )
 
 
