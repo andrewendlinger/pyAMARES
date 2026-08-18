@@ -11,7 +11,8 @@ same way `scikit-learn` is imported as `sklearn`.
 - Upstream license: BSD 3-Clause, Copyright (c) 2023-2025 Jia Xu, Magnetic Resonance
   Research Facility, University of Iowa. Preserved verbatim in [`LICENSE.txt`](LICENSE.txt).
 - Upstream base for this release: **0.3.33**
-- Last verified against upstream: **2026-07-21**
+- Last verified against upstream: **2026-08-18** — `hawkMRS/pyAMARES@145f817` is still the
+  upstream tip and is an ancestor of this branch, so every difference is one listed below.
 
 Please cite the original authors — this repackage adds nothing to cite:
 
@@ -27,9 +28,10 @@ Please cite the original authors — this repackage adds nothing to cite:
 | `0.3.x.postN` | Repackage-only re-release on identical upstream source. |
 | `0.4.0+` | Behaviour diverges from upstream. Every difference gets a `D`-entry below. |
 
-PyPI versions are immutable, so `0.3.33` remains permanently available as the
-zero-divergence artifact even after later versions diverge. Cite that version if you need a
-build that is provably upstream-equivalent.
+`0.4.0` is the first diverging release, and divergence is the accepted long-term direction:
+upstream is tracked and cherry-picked, not followed. PyPI versions are immutable, so `0.3.33`
+remains permanently available as the zero-divergence artifact even after later versions
+diverge. Cite that version if you need a build that is provably upstream-equivalent.
 
 ## Install hazard
 
@@ -77,8 +79,8 @@ Nothing under `pyAMARES/` is modified. All entries below are `setup.py` metadata
                cause is as stated, but the threshold in this entry is wrong:
                pandas 2.1.4, which these caps resolve to, warns on exactly the
                same write. Only pandas 3.0 makes it fatal. The AttributeError
-               half was never reproduced. The caps themselves are untouched here;
-               revisiting them is a packaging decision.
+               half was never reproduced. The caps themselves are untouched by
+               D11; they are lifted in D16, which supersedes this entry.
 
 ## D3 — distribution renamed, attribution added
 
@@ -105,20 +107,24 @@ Nothing under `pyAMARES/` is modified. All entries below are `setup.py` metadata
                at cp312; the classifiers advertised versions that cannot install
     Change:    dropped the 3.13 and 3.14 trove classifiers
     Not done:  python_requires still says >=3.8 — see C4
+    Update:    reversed in 0.4.0. D16 lifts the caps and restores both
+               classifiers; python_requires stays >=3.8, now on evidence.
 
 ---
 
 # D — Divergences (shipped in 0.4.0, unreleased)
 
-The first entries that touch code under `pyAMARES/`. Their shared purpose is to
-make the source correct under numpy 2, pandas ≥2.2 and pandas 3 **without moving
-the shipped stack**: every entry below is verified against the frozen regression
-corpus (`tests/goldens/`, captured on py3.12 / numpy 1.26.4 / pandas 2.1.4), and
-every golden is byte-identical before and after. The dependency metadata in
-`setup.py` still carries D2's caps; lifting them is a separate decision.
+D6–D15 are the first entries that touch code under `pyAMARES/`. Their shared
+purpose is to make the source correct under numpy 2, pandas ≥2.2 and pandas 3
+**without moving the shipped stack**: every one of them is verified against the
+frozen regression corpus (`tests/goldens/`, captured on py3.12 / numpy 1.26.4 /
+pandas 2.1.4), and every golden is byte-identical before and after. D16 is the
+packaging half — with the source correct and nmrglue 0.12 published, it lifts
+D2's caps and lets the new stack actually be installed.
 
 Verified stacks: py3.12 with pandas 2.1.4 / 2.2.3 / 2.3.3 under numpy 1.26.4, and
-py3.13 / py3.14 with pandas 2.3.3 / 3.0.3 / 3.0.5 under numpy 2.5.2.
+py3.13 / py3.14 with pandas 2.3.3 / 3.0.3 / 3.0.5 under numpy 2.5.2. See the
+compatibility matrix at the end for the post-D16 resolutions.
 
 ## D6 — `parse_bounds` accumulator frames declare `dtype=object`
 
@@ -271,6 +277,55 @@ py3.13 / py3.14 with pandas 2.3.3 / 3.0.3 / 3.0.5 under numpy 2.5.2.
                algorithm unchanged
     Rationale: BSD attribution requirement; no code change
 
+## D16 — the dependency ceilings come off; nmrglue is floored at 0.12
+
+    Status:    shipped in 0.4.0
+    Symptom:   `pip install pyamares-xmris` on Python 3.13+ tried to build numpy
+               1.26 from source and failed with a compiler error; on any Python
+               it pinned the environment to numpy 1.x / pandas 2.1, which no
+               longer matched what the source (D6-D15) supports
+    Cause:     D2's numpy<2.0.0 / pandas<2.2.0 caps, and C1's blocker underneath
+               them — nmrglue 0.11 used np.dtype('a8'), removed in numpy 2, and
+               pyAMARES imports nmrglue eagerly, so the failure was fatal at
+               `import pyAMARES` rather than at the one function it needs
+    Change:    numpy>=1.18.1,<2.0.0        -> numpy>=1.18.1
+               pandas>=1.1.0,<2.2.0        -> pandas>=1.1.0
+               nmrglue                     -> nmrglue>=0.12
+               classifiers: Python 3.13 and 3.14 restored
+               python_requires: unchanged at >=3.8 (see below)
+               description: no longer claims "zero algorithm changes"; it now
+               says minimal, ledger-documented compatibility fixes and points at
+               this file. README.rst's opening note reworded to match.
+               requirements.txt: emptied to a comment. It duplicated the
+               dependency list without versions, so it could only ever
+               contradict setup.py; the file is kept so upstream merges stay
+               quiet.
+    Floors:    only the ceilings are removed. Every floor, and every other
+               dependency, is untouched — dependency slimming is deliberately
+               out of scope, see C5.
+    hlsvdpro:  its D1 marker is unchanged and needs no python_version guard.
+               hlsvdpro 2.0.0's py38-none wheels resolve on cp313 and cp314 for
+               x86_64 manylinux and Windows (uv dry-run, 2026-08-17).
+    python_requires: stays ">=3.8". The cap C4 proposed is no longer needed, and
+               the floor was tested rather than assumed: with the ceilings off,
+               Python 3.8 resolves to numpy 1.24.4 / pandas 2.0.3 / scipy 1.10.1
+               / nmrglue 0.12, and all 53 corpus tests pass there. nmrglue 0.12
+               declares no python_requires of its own and still classifies 3.8;
+               its source compiles clean under a 3.8 interpreter. So no 3.8 or
+               3.9 classifier is trimmed.
+    Evidence:  nmrglue 0.12 (PyPI, 2026-08-16) carries the fix — the wheel's
+               fileio/tecmag.py reads `TNTMAGIC = np.dtype('S8')`, and 0.12
+               imports fine on numpy 1.26.4, so the floor costs old-stack users
+               nothing. The 53-test corpus is green on py3.8/3.9/3.12/3.13/3.14
+               under the resolutions in the compatibility matrix, and still green
+               on the frozen baseline (py3.12 / numpy 1.26.4 / pandas 2.1.4) with
+               nmrglue 0.11 force-installed and with 0.12 — identical goldens
+               either way, so bumping the floor is not itself a numeric change.
+               The old stack also still resolves through the published metadata:
+               `--with . --with 'numpy<2' --with 'pandas<2.2'` gives numpy 1.26.4
+               / pandas 2.1.4, i.e. dropping the ceilings did not raise a floor.
+    Resolves:  C1, C4; completes C2
+
 ## Considered and deliberately not changed
 
 `kernel/lmfit.py: load_parameter_from_csv` — `df.where(pd.notnull(df), None)` was
@@ -289,9 +344,23 @@ recording this was added.
 
 Not commitments. Recorded so the cost is known when the question comes up.
 
-## C1 — numpy 2.x support (would lift the Python ceiling)
+## C1 — numpy 2.x support (would lift the Python ceiling) — RESOLVED in 0.4.0
 
-    Status:    blocked on a third party
+    Resolution: option (a) happened. nmrglue 0.12 was released to PyPI on
+               2026-08-16 carrying exactly the fix this entry was waiting on
+               (np.dtype('a8') -> np.dtype('S8')), so no source change and no
+               inlined FFT was needed — D16 floors the dependency at 0.12 and
+               drops the numpy ceiling. nmrglue remains in use — and note the
+               historical Notes below undercount it: besides ng.proc_base.fft
+               (12 call sites across kernel/objective_func.py, kernel/fid.py,
+               util/hsvd.py, util/visualization.py, libs/MPFIR.py), pyAMARES
+               also calls ng.proc_base.em (kernel/fid.py, 2 sites), so a future
+               "drop nmrglue" (option b) must inline both wrappers, not one.
+               The Python ceiling this entry describes is gone with it: 3.13 and
+               3.14 are supported, classified and corpus-verified, and the
+               package no longer pins anyone to numpy 1.x.
+
+    Status:    resolved by D16 — history below
     Blocker:   nmrglue 0.11 (last PyPI release, 2024-10-29) uses np.dtype('a8'),
                removed in numpy 2.0 -> import-time TypeError
     Upstream:  already fixed on nmrglue master (np.dtype('S8'), commit 5a6c58e),
@@ -310,9 +379,15 @@ Not commitments. Recorded so the cost is known when the question comes up.
     Evidence:  with nmrglue installed from git, Python 3.13 and 3.14 both work —
                see "Compatibility matrix" below
 
-## C2 — pandas 3.x support
+## C2 — pandas 3.x support — RESOLVED in 0.4.0
 
-    Status:    source addressed in 0.4.0; the dependency metadata is not
+    Resolution: fully resolved. D7 and D8 fix the read this entry describes,
+               D10 and D11 fix the two breaks that surfaced behind it, and D16
+               drops the pandas<2.2 cap so the supported source can actually
+               meet a supported pandas. A fresh install on py3.12-3.14 now
+               resolves to pandas 3.0.5, with the corpus green.
+
+    Status:    resolved by D7/D8/D10/D11 + D16 — history below
     Symptom:   TypeError: object of type 'float' has no len()
     Cause:     pandas 3.0 defaults string columns to the `str` dtype (PDEP-14), where
                missing values read back as NaN rather than None. The `expr` read in
@@ -326,50 +401,103 @@ Not commitments. Recorded so the cost is known when the question comes up.
                notebooks now pass on pandas 3.0.3 and 3.0.5 under numpy 2.
     Not done:  setup.py still declares pandas<2.2 — see D2. Whether to lift that
                cap, and to what floor, is a packaging decision.
+               (Done in D16: the cap is gone, the floor stays at 1.1.0.)
     Note:      independent of C1 — pandas 2.3 works fine under numpy 2
 
-## C3 — `sd` columns are not reproducible across dependency versions
+## C3 — `sd` columns are not reproducible across dependency versions — CLOSED by policy
 
-    Status:    open, needs a domain decision
-    Symptom:   sd, sd(ppm), sd(Hz), sd(deg) differ by up to 238% between dependency
-               sets on identical input; some values come out negative
-    Cause:     util/crlb.py:56-68 inverts a Fisher matrix that pyAMARES itself flags
-               as ill-conditioned, via scipy.linalg.pinv or np.linalg.lstsq. Their
-               rank cutoffs shift between LAPACK/scipy builds.
-    Not a regression: pre-existing fragility. The current shipped stack produces
-               sd(Hz) = 47107 on the documented example.
-    Unaffected: every fitted parameter and every CRLB column agrees to ~1e-7
-    Blocks:    this, not the code, is the real cost of C1/C2 — bumping deps needs a
-               regression corpus and a judgement on whether `sd` is trusted at all
-    Open question: does xmris consume the `sd` column? If not, the validation
-               burden largely disappears.
+    Resolution: closed as a documented limitation, not fixed. The four `sd`
+               columns — sd, sd(ppm), sd(Hz), sd(deg) — are **not validated
+               across dependency stacks**, and 0.4.0 ships saying so. Nothing in
+               util/crlb.py is touched: the ill-conditioning is upstream's
+               numerics, and "improve" here means changing fitted uncertainties,
+               which is a domain decision no packaging release should make.
+    Guarded:   structurally only, never golden-compared, and
+               test_goldens_never_freeze_the_sd_columns fails the suite if a
+               re-capture quietly starts freezing them. What is asserted:
+                 - every value finite, strictly positive, and sd < amplitude
+                 - the *measured* proportionality sd = k*(CRLB/100)*|value| with
+                   one fit-wide k (k is not 1 — report_amares fills sd from
+                   lmfit's stderr and CRLB from the Fisher matrix separately)
+                 - monotone growth with the noise scale
+    Locked:    every fitted parameter and every CRLB column is regression-locked
+               against the frozen goldens at rtol 1e-4.
+    Open question, answered: yes, xmris consumes all four. fitting/amares.py maps
+               each of amplitude/chem_shift/linewidth/phase to its (sd, CRLB%)
+               pair and reads all eight columns. But it asserts only relative
+               properties of them, never an absolute sd value, so the columns
+               being stack-dependent does not make xmris stack-dependent — and
+               the validation burden this entry feared does not materialise.
+    Status:    closed; revisit only if someone needs trustworthy absolute sd
 
-## C4 — `python_requires` does not reflect the real ceiling
+## C4 — `python_requires` does not reflect the real ceiling — RESOLVED in 0.4.0
 
-    Status:    open, trivial
-    Symptom:   on Python 3.13+, pip attempts a from-source numpy 1.26 build and fails
-               with a compiler error instead of a clean "requires Python <3.13"
-    Change:    python_requires=">=3.8,<3.13" while D2 stands
-    Not done:  tightening it changes upstream behaviour, which 0.3.x avoids by policy.
-               Revisit at 0.4.0, or drop entirely if C1 lands.
+    Resolution: resolved by D16 without the change this entry proposed. The
+               ">=3.8,<3.13" cap existed only to describe D2's caps honestly;
+               D2's caps are gone, so there is no ceiling left to declare.
+               python_requires stays ">=3.8" — now on evidence rather than by
+               inheritance: Python 3.8 resolves (numpy 1.24.4 / pandas 2.0.3 /
+               nmrglue 0.12) and the 53-test corpus passes there. The symptom
+               this entry described — a from-source numpy 1.26 build on 3.13+ —
+               cannot occur any more, because numpy is no longer capped.
+    Status:    resolved by D16
+
+## C5 — dependency slimming (deliberately out of 0.4.0)
+
+    Status:    open, deliberately deferred to 0.5.0
+    Symptom:   `pip install pyamares-xmris` pulls a Jupyter stack and an HTTP
+               client into any environment that only wants to fit spectra. On a
+               py3.13 resolution that is 62 packages for a library whose own
+               imports are numpy/scipy/pandas/matplotlib/lmfit/sympy/nmrglue.
+    Candidates: ipython, ipykernel, ipywidgets (the two ipywidgets marker lines
+               together), requests, mat73, xlrd. Two of them are already odd:
+               the `jupyter` extra declares ipykernel a second time, so the
+               runtime dependency and the extra disagree about whose job it is;
+               and hlsvdpro is dead weight under numpy>=2, where util/hsvd.py
+               never imports it at all (D1's note) — the new default resolution
+               therefore installs an x86_64 binary that nothing loads.
+    Cost:      import-graph verification. `import pyAMARES` is eager (kernel/fid.py
+               and libs/MPFIR.py pull nmrglue and matplotlib at import time), so a
+               demotion that misses one module turns a missing extra into a fatal
+               ImportError rather than a deferred one. Beyond that, the six
+               example notebooks and script/amaresfit_gui.py are real workflows
+               that would break if the Jupyter/HTML-display path is demoted
+               without an extra to restore it.
+    Shape:     if taken — keep the hard six in install_requires, move the rest
+               behind extras (`notebook`, `io`), and make the extras additive so
+               `pyamares-xmris[jupyter]` reproduces today's install exactly.
+    Not now:   0.4.0's job is the numpy 2 / pandas 3 lift, which is verified by
+               the corpus. Slimming changes what an existing user's `pip install
+               -U` leaves them with, and needs its own verification pass.
 
 ---
 
 # Compatibility matrix
 
-Documented example fit (`pyAMARES/examples/fid.txt` +
-`example_human_brain_31P_7T.csv`), verified 2026-07-21 on macOS arm64.
+The 53-test regression corpus (`tests/test_regression.py` + `tests/test_api_surface.py`),
+verified 2026-08-18 on macOS arm64. "Resolved" rows are what `pip install pyamares-xmris`
+actually produces on that Python after D16 — nothing is pinned.
 
-| Python | numpy | pandas | scipy | nmrglue | Result |
-|---|---|---|---|---|---|
-| 3.12 | 1.26.4 | 2.1.4 | 1.17.1 | 0.11 | **ships today** — fit converges |
-| 3.13 | 2.5.1 | 3.0.3 | 1.18.0 | git | fails — C2 |
-| 3.13 | 2.5.1 | 2.3.3 | 1.18.0 | 0.11 | fails — C1 |
-| 3.13 | 2.5.1 | 2.3.3 | 1.18.0 | git | fit converges |
-| 3.14 | 2.5.1 | 2.3.3 | 1.18.0 | git | fit converges |
+| Python | numpy | pandas | scipy | nmrglue | How reached | Result |
+|---|---|---|---|---|---|---|
+| 3.8 | 1.24.4 | 2.0.3 | 1.10.1 | 0.12 | resolved (the floor) | 53 green |
+| 3.9 | 2.0.2 | 2.3.3 | 1.13.1 | 0.12 | resolved | 53 green |
+| 3.12 | 1.26.4 | 2.1.4 | 1.17.1 | 0.11 | pinned — **the golden stack** | 53 green |
+| 3.12 | 1.26.4 | 2.1.4 | 1.17.1 | 0.12 | pinned numpy/pandas only | 53 green |
+| 3.12 | 2.5.2 | 3.0.5 | 1.18.0 | 0.12 | resolved | 53 green |
+| 3.13 | 2.5.2 | 2.3.3 | 1.18.0 | 0.12 | pinned pandas only | 53 green |
+| 3.13 | 2.5.2 | 3.0.5 | 1.18.0 | 0.12 | resolved | 53 green |
+| 3.14 | 2.5.2 | 3.0.5 | 1.18.0 | 0.12 | resolved | 53 green |
 
-Cross-checking the last row against the first: all fitted parameters and all CRLB columns
-agree to ~1e-7 (float roundoff); only the `sd` columns diverge (C3).
+Phase-2 verification additionally covered py3.12 with pandas 2.2.3 under numpy 1.26.4, and
+py3.13 with pandas 3.0.3 under numpy 2.5.2, plus all six example notebooks under pandas 3.
 
-Caveat: this is one example fit, not a regression suite. Treat it as evidence that the
-blockers are correctly identified, not as validation that numpy 2 is safe for production use.
+Rows 3 and 4 differ only in nmrglue, and produce identical goldens — D16's floor bump is not
+a numeric change. Across every row: all fitted parameters and all CRLB columns match the
+frozen goldens at their 1e-4 default rtol (1e-3 for `CRLB(cs%) `, 1e-6 atol for
+`chem shift(ppm)`); only the `sd` columns vary, which is C3 and is why they are guarded
+structurally rather than frozen.
+
+This is no longer one example fit. `tests/` is a regression suite whose goldens are frozen on
+the 0.3.33 stack (row 3), so a row being green means the fitted output is the shipped output —
+not merely that the fit converged.
