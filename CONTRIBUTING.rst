@@ -43,8 +43,8 @@ Setting Up Your Development Environment
 
     .. note::
        This installs the package in editable mode (``-e``) along with all development
-       dependencies specified in the ``[dev]`` extra of the project's setup
-       (e.g., in ``pyproject.toml`` or ``setup.py``). This typically includes
+       dependencies specified in the ``[dev]`` extra of the project's
+       ``pyproject.toml``. This typically includes
        tools for documentation, testing, linting, and formatting (like ``Sphinx``,
        ``pytest``, ``ruff``, ``pre-commit``).
 

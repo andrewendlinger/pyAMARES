@@ -1,16 +1,195 @@
 [build-system]
-requires = ["setuptools>=42", "wheel"]
+# The binding floor is 70.1, the release that vendored `wheel` into setuptools --
+# below it the dropped `wheel` dependency would be needed to build one at all.
+# (PEP 621 metadata itself needs only >=61, and PEP 660 editable installs, which
+# now matter because there is no setup.py to fall back to, need >=64.) Python 3.8
+# resolves setuptools 75.3.4, the last line that supports it, which satisfies all
+# three.
+requires = ["setuptools>=70.1"]
 build-backend = "setuptools.build_meta"
+
+[project]
+name = "pyamares-xmris"
+dynamic = ["version"]
+description = """\
+PyAMARES repackaged for clean pip installs on Apple Silicon (arm64) and for \
+numpy 2 / pandas 3: a faithful BSD repackage of HawkMRS/pyAMARES carrying only \
+minimal, ledger-documented compatibility fixes (see DIVERGENCE.md); still \
+'import pyAMARES'."""
+readme = {file = "README.rst", content-type = "text/x-rst"}
+# Kept at upstream's floor: with the caps lifted, 3.8 still resolves (numpy
+# 1.24.4 / pandas 2.0.3 / nmrglue 0.12) and the regression corpus passes there.
+# No upper bound — 3.13 and 3.14 are verified. See D16.
+requires-python = ">=3.8"
+# Two entries on purpose: a {name}-only entry becomes `Author:` and an
+# {email}-only entry becomes `Author-email:`, which is exactly the pair setup.py
+# emitted. Merging them into one {name, email} entry would collapse both into a
+# single quoted `Author-email:` line — the name contains commas — and drop
+# `Author:` from the metadata. The runtime `__author__` stays in
+# pyAMARES/__init__.py; only `__version__` is read from there at build time.
+authors = [
+    {name = "Jia Xu, MR Research Facility, University of Iowa"},
+    {email = "jia-xu-1@uiowa.edu"},
+]
+# The pre-PEP-639 table form, deliberately. PEP 639's SPDX form
+# (`license = "BSD-3-Clause"` plus a `license-files` key in [project]) requires
+# setuptools >= 77, which dropped Python 3.8 — and 3.8 is this package's floor.
+# Revisit when the 3.8 floor goes. See D19. The trove classifier below stays
+# either way. `license-files` lives under [tool.setuptools] for the same reason.
+license = {text = "BSD-3-Clause"}
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Scientific/Engineering",
+    "License :: OSI Approved :: BSD License",
+    "Operating System :: OS Independent",
+]
+# What the fitting engine itself imports. Everything else -- the Jupyter stack,
+# the HTTP client, the optional file readers -- lives behind an extra (D18).
+dependencies = [
+    "numpy>=1.18.1",
+    "scipy>=1.2.1",
+    "pandas>=1.1.0",
+    "matplotlib>=3.1.3",
+    "lmfit",
+    "sympy",
+    # 0.12 replaced np.dtype('a8') with np.dtype('S8'); anything older fails to
+    # import under numpy 2. The floor is still required after D17 made the import
+    # lazy -- laziness only moves the failure from `import pyAMARES` to the first
+    # ng.proc_base call, which is harder to diagnose, not less fatal. See D16.
+    "nmrglue>=0.12",
+    "jinja2",
+    "tqdm",
+]
+
+# keep matlab/excel/hlsvd members in sync inside jupyter and dev -- TOML cannot
+# compose lists. setup.py built these by concatenation; here every member is
+# written out literally, so `jupyter` must repeat matlab + excel, and `dev` must
+# repeat jupyter + docs + ruff. The published metadata is identical either way.
+[project.optional-dependencies]
+# MATLAB v7.3 (HDF5) .mat reading -- fileio/readmat.py::readmrs and
+# fileio/readfidall.py::read_fidall import mat73 inside the v7.3 branch only.
+matlab = [
+    "mat73",
+]
+# Excel prior knowledge -- kernel/PriorKnowledge.py hands .xlsx/.xls to
+# pandas.read_excel, which needs openpyxl (.xlsx) or xlrd (legacy .xls).
+excel = [
+    "openpyxl",
+    "xlrd",
+]
+# The optional native HSVD backend. Deliberately its own extra and part of no
+# other: on any environment with setuptools >= 82 -- i.e. everything from Python
+# 3.9 up -- hlsvdpro 2.0.0 installs but cannot import (module-scope
+# `import pkg_resources`), and util/hsvd.py never looks for it under numpy >= 2.
+# It is still live on x86_64 Python 3.8 with numpy 1.x, where setuptools is
+# capped below 82, and that is who this extra is for. The marker is D1's: the
+# project publishes x86_64/amd64 wheels only, and no sdist. See D18.
+hlsvd = [
+    "hlsvdpro>=2.0.0; platform_machine == 'x86_64' or platform_machine == 'amd64'",
+]
+# Everything the example notebooks and the interactive workflows need. Members
+# are listed literally rather than through self-referential extras, so the
+# metadata stays readable on old pip/setuptools: `pip install
+# 'pyamares-xmris[jupyter]'` reproduces the pre-0.5.0 install (minus hlsvdpro,
+# which has its own extra), plus notebook and openpyxl. See D18.
+jupyter = [
+    "notebook",
+    "ipykernel",
+    "ipython",
+    "ipywidgets>=7.6.0,<8.0.0;python_version<'3.11'", # For older Python versions
+    "ipywidgets>=8.0.0;python_version>='3.11'",       # For newer Python versions
+    "requests",
+    # = matlab
+    "mat73",
+    # = excel
+    "openpyxl",
+    "xlrd",
+]
+docs = [
+    "sphinx",
+    "nbsphinx",
+    "sphinx_tabs",
+    "sphinx_rtd_theme",
+    "Pygments",
+    "ipywidgets",
+]
+ruff = [
+    "ruff",
+    "pre-commit",
+    "pytest",
+]
+# = jupyter + docs + ruff
+dev = [
+    # = jupyter
+    "notebook",
+    "ipykernel",
+    "ipython",
+    "ipywidgets>=7.6.0,<8.0.0;python_version<'3.11'", # For older Python versions
+    "ipywidgets>=8.0.0;python_version>='3.11'",       # For newer Python versions
+    "requests",
+    "mat73",
+    "openpyxl",
+    "xlrd",
+    # = docs
+    "sphinx",
+    "nbsphinx",
+    "sphinx_tabs",
+    "sphinx_rtd_theme",
+    "Pygments",
+    "ipywidgets",
+    # = ruff
+    "ruff",
+    "pre-commit",
+    "pytest",
+]
+
+[project.urls]
+Homepage = "https://github.com/andrewendlinger/pyAMARES"
+"Upstream (original project)" = "https://github.com/hawkMRS/pyAMARES"
+"Upstream documentation" = "https://pyamares.readthedocs.io/en/latest/index.html"
+"Divergence from upstream" = "https://github.com/andrewendlinger/pyAMARES/blob/pyamares-xmris/DIVERGENCE.md"
+
+[project.scripts]
+amaresFit = "pyAMARES.script.amaresfit:main"
+
+[tool.setuptools]
+license-files = ["LICENSE.txt"]
+include-package-data = true
+zip-safe = false
+
+[tool.setuptools.packages.find]
+# Equivalent to setup.py's find_packages(exclude=["tests", "tests.*"]) -- the
+# wheel's top_level.txt must contain `pyAMARES` and nothing else (D4).
+include = ["pyAMARES*"]
+# Required for that equivalence: this table defaults to namespaces = true, i.e.
+# find_namespace_packages, which would additionally declare `pyAMARES.examples`
+# (a data directory with no __init__.py) as a package -- 7 discovered instead of
+# find_packages' 6. Its data files reach the wheel through MANIFEST.in and
+# include-package-data either way; declaring it a package is what differs.
+namespaces = false
+
+[tool.setuptools.dynamic]
+# Read statically out of the literal assignment in pyAMARES/__init__.py --
+# setuptools parses the AST and does not import the package at build time, so
+# the build environment needs none of the runtime dependencies.
+version = {attr = "pyAMARES.__version__"}
 
 [tool.ruff]
 line-length = 88
-target-version = "py37"  
+target-version = "py38"
 # Exclude all Jupyter notebooks and third-party code
-exclude = ["*.ipynb", 
-           "pyAMARES/libs/hlsvd.py" ]  
+exclude = ["*.ipynb",
+           "pyAMARES/libs/hlsvd.py" ]
 lint.select = ["E", "F", "W", "I"]
 lint.ignore = ["E741", "E501",]
 
-# E501 (line length limit) is skipped because Sphinx does not allow manual line breaks 
-# in docstrings, and there is currently no way to enforce E501 for code while 
+# E501 (line length limit) is skipped because Sphinx does not allow manual line breaks
+# in docstrings, and there is currently no way to enforce E501 for code while
 # selectively ignoring docstrings.
