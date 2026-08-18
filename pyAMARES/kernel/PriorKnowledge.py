@@ -391,9 +391,19 @@ def generateparameter(
         lmfit.Parameters: Parameters object with initialized parameters for modeling.
     """
     if fname.endswith("xlsx") or fname.endswith("xls"):
-        pk = pd.read_excel(
-            fname, index_col=0, sheet_name=0, comment="#"
-        )  # , skiprows=find_header_row(fname), comment='#')
+        try:
+            pk = pd.read_excel(
+                fname, index_col=0, sheet_name=0, comment="#"
+            )  # , skiprows=find_header_row(fname), comment='#')
+        except ImportError as exc:
+            # pandas raises ImportError when its Excel engine is missing. Both
+            # engines are optional extras since D18.
+            raise ImportError(
+                "Reading an Excel prior knowledge file (%s) requires a pandas "
+                "Excel engine: openpyxl for .xlsx, xlrd for legacy .xls. "
+                "Install them with: pip install 'pyamares-xmris[excel]' "
+                "-- or save the prior knowledge as CSV, which needs no extra." % fname
+            ) from exc
     elif fname.endswith(".csv"):
         pk = pd.read_csv(
             fname, index_col=0, skiprows=find_header_row(fname), comment="#"
