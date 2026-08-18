@@ -547,12 +547,21 @@ recording this was added.
                `test-extras` job (py3.8 and py3.13) installs `.[jupyter]` and
                imports everything the extra promises. test-notebooks.yml installs
                `-e ".[jupyter]"` — step1_download.ipynb uses requests.
-    Evidence:  the corpus (53 tests + the 3 new ones) is green on an unpinned
-               py3.13 bare install with all nine demoted names confirmed absent
-               via importlib.util.find_spec, and on the frozen golden stack
-               (py3.12 / numpy 1.26.4 / pandas 2.1.4). All six example notebooks
-               pass under `.[jupyter]`. The published metadata was read back out
-               of the built wheel's METADATA, not just off setup.py.
+    Evidence:  measured on py3.13 by the same method on both sides
+               (importlib.metadata.distributions() in a fresh resolution):
+               64 distributions for 0.4.0 from PyPI, 27 for this branch —
+               Jinja2, MarkupSafe, asteval, certifi, contourpy, cycler, dill,
+               fonttools, kiwisolver, lmfit, matplotlib, mpmath, nmrglue, numpy,
+               packaging, pandas, pillow, pip, pyamares-xmris, pyparsing,
+               python-dateutil, scipy, six, sympy, tqdm, uncertainties, wheel.
+               The corpus (55 tests + the 3 new ones) is green on that bare
+               py3.13 install, with all nine demoted names confirmed absent via
+               importlib.util.find_spec, and on the frozen golden stack (py3.12 /
+               numpy 1.26.4 / pandas 2.1.4) — 58 passed either way, every golden
+               untouched. All six example notebooks pass under `.[jupyter]` (93
+               cells, step1_download's requests included). The published metadata
+               was read back out of the built wheel's METADATA, not just off
+               setup.py.
     Resolves:  C5
     Supersedes: D1 — the marker it introduced is gone, because the dependency it
                qualified is gone. The arm64 install problem D1 fixed stays fixed,
