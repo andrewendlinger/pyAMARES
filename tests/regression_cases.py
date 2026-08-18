@@ -15,6 +15,9 @@ dependence.
 from __future__ import annotations
 
 import os
+import platform
+import re
+import sys
 
 # Since D17, `import pyAMARES` no longer pulls in matplotlib.pyplot -- but the fits
 # themselves still can (any ifplot/preview path, and report_amares -> util/crlb.py),
@@ -36,6 +39,45 @@ EXAMPLE_FID_PATH = os.path.join(TESTS_DIR, "fid.txt")
 EXAMPLE_PRIOR_PATH = os.path.join(TESTS_DIR, "example_human_brain_31P_7T.csv")
 SYNTHETIC_PRIOR_PATH = os.path.join(TESTS_DIR, "priors", "synthetic_3peak.csv")
 GOLDENS_DIR = os.path.join(TESTS_DIR, "goldens")
+
+
+def platform_goldens_key() -> str:
+    """The directory name a platform-specific golden set lives under.
+
+    ``"<sys.platform>-<machine>"`` — ``darwin-arm64``, ``linux-x86_64``. The
+    canonical goldens sitting directly in ``tests/goldens/`` were captured on
+    ``darwin-arm64`` and remain the reference for every platform; a
+    ``tests/goldens/<key>/`` directory overrides them *per file* where one has
+    been captured and reviewed. Nothing is generated from this key — it only
+    names a lookup — so an unknown platform simply falls back to the canonical
+    files, which is the behaviour every platform had before platform
+    directories existed.
+    """
+    return f"{sys.platform}-{platform.machine()}"
+
+
+def platform_goldens_dir() -> str:
+    """Absolute path of :func:`platform_goldens_key`'s directory (may not exist)."""
+    return os.path.join(GOLDENS_DIR, platform_goldens_key())
+
+
+#: The grammar :func:`platform_goldens_key` builds: two lowercase-led words joined
+#: by a hyphen, the second allowed digits, underscores and dots (``linux-x86_64``,
+#: ``darwin-arm64``, ``win32-AMD64`` — hence the case-insensitive machine half).
+#: Single source for both the test that policies ``tests/goldens/`` subdirectories
+#: and ``capture_goldens.py``'s refusal to write a platform set on the wrong host.
+PLATFORM_DIR_RE = re.compile(r"^[a-z][a-z0-9]*-[A-Za-z0-9_.]+$")
+
+
+def looks_like_platform_dir(name: str) -> bool:
+    """Is ``name`` shaped like a platform golden directory (whatever the host)?
+
+    A *shape* test, not a match against this host: it is what lets a guard say
+    "you are writing into something that claims to be a platform set" before
+    checking whether it is *this* platform's.
+    """
+    return bool(PLATFORM_DIR_RE.match(name))
+
 
 # --- Case A: the documented README quick-start acquisition parameters -------------
 EXAMPLE_MHZ = 120.0
@@ -78,6 +120,21 @@ SYNTHETIC_GROUND_TRUTH = pd.DataFrame(
 
 # --- Case C: HSVD ------------------------------------------------------------------
 HSVD_NUM_COMPONENTS = 8
+
+# --- Case D: the vendored HSVD backend, frozen ------------------------------------
+#: Name of the golden that freezes :func:`run_hsvd_vendored_backend_case`. It is not
+#: in :data:`GOLDEN_CASES` because its payload is not a ``result_multiplets`` table.
+HSVD_VENDORED_CASE = "hsvd_vendored_backend"
+
+#: The per-component fields frozen by that golden, in the order the rows carry them.
+#: ``frequency_hz`` and ``damping`` come out of ``convert_hlsvd_result``, which
+#: divides/multiplies by the dwell time it is handed: we pass seconds, so the
+#: frequencies are in Hz and the (negative) damping factors in seconds, not the kHz
+#: and ms the vendored docstring names for a dwell given in ms. ``phase_deg`` is
+#: degrees — converted upstream with a truncated ``180.0/3.1415926``, so it is
+#: about 9e-8 relative off true degrees. Both quirks are upstream behaviour and are
+#: frozen as they are, not corrected here.
+HSVD_COMPONENT_FIELDS = ["frequency_hz", "damping", "amplitude", "phase_deg"]
 
 
 def quiet() -> None:
@@ -273,6 +330,59 @@ def run_hsvd_case():
     return {"fidobj": fidobj, "params": params, "table": table}
 
 
+def run_hsvd_vendored_backend_case():
+    """Case D — the vendored pure-Python HSVD backend on the Case A example FID.
+
+    Called **directly**, bypassing ``pyAMARES/util/hsvd.py``'s backend selection:
+    the golden pins the vendored algorithm itself, so it stays meaningful on a
+    stack where ``util/hsvd.py`` would have bound ``hlsvdpro`` instead (x86_64,
+    numpy 1.x, hlsvdpro importable). It is also upstream of ``HSVDinitializer``'s
+    ``curve_fit`` refinement and of its ``dk``/linewidth filtering, so what is
+    frozen here is the decomposition, not the initializer's post-processing.
+
+    Components are sorted by frequency rather than left in the backend's own
+    descending-singular-value order: two singular values can be near-ties, and a
+    swap between them across dependency stacks would look like a total mismatch
+    on every field. The example FID's components are well separated in frequency
+    (nearest pair ~67 Hz apart), so that ordering is stable.
+
+    The wrapper returns the *full* singular-value spectrum of the Hankel matrix
+    (hundreds of values), not ``nsv_found`` of them; only the largest
+    :data:`HSVD_NUM_COMPONENTS` — the ones that carry the model — are returned.
+
+    Returns
+    -------
+    dict
+        ``nsv_found`` (int), ``components`` (DataFrame of
+        :data:`HSVD_COMPONENT_FIELDS`, one row per component, frequency-sorted,
+        integer-indexed) and ``top_singular_values`` (descending ndarray).
+    """
+    quiet()
+    from pyAMARES.libs import hlsvd as vendored_hlsvd
+
+    fid = pyAMARES.readmrs(EXAMPLE_FID_PATH)
+    nsv_found, singular_values, frequencies, dampings, amplitudes, phases = (
+        vendored_hlsvd.hlsvd(fid, HSVD_NUM_COMPONENTS, 1.0 / EXAMPLE_SW)
+    )
+    columns = {
+        "frequency_hz": np.asarray(frequencies, dtype=float),
+        "damping": np.asarray(dampings, dtype=float),
+        "amplitude": np.asarray(amplitudes, dtype=float),
+        "phase_deg": np.asarray(phases, dtype=float),
+    }
+    order = np.argsort(columns["frequency_hz"], kind="stable")
+    components = pd.DataFrame(
+        {field: columns[field][order] for field in HSVD_COMPONENT_FIELDS}
+    )
+    components.index = range(len(components))
+    top = np.sort(np.asarray(singular_values, dtype=float))[::-1][:HSVD_NUM_COMPONENTS]
+    return {
+        "nsv_found": int(nsv_found),
+        "components": components,
+        "top_singular_values": top,
+    }
+
+
 _SYNTHETIC_CACHE: dict = {}
 
 
@@ -288,17 +398,52 @@ def synthetic_variant_result(variant: str):
     return _SYNTHETIC_CACHE[variant]
 
 
-#: The golden cases, by name. Each entry returns the FID object whose
-#: ``result_multiplets`` gets frozen. ``capture_goldens.py`` and
-#: ``test_regression.py`` both iterate this mapping, so adding a golden case is a
-#: one-line change here. The synthetic entry reuses the named
-#: :data:`SYNTHETIC_VARIANTS` spec through the memoized runner, so the golden and
-#: the physics tests cannot drift apart.
-GOLDEN_CASES = {
-    "example_readme": run_example_case,
-    "example_xmris_shape": run_example_xmris_shape_case,
-    "synthetic_noise1_gfree": lambda: synthetic_variant_result("noise1_gfree")[0],
+#: Payload kind of a case whose golden freezes a ``result_multiplets`` table.
+KIND_RESULT_MULTIPLETS = "result_multiplets"
+#: Payload kind of a case whose golden freezes an HSVD decomposition.
+KIND_HSVD_COMPONENTS = "hsvd_components"
+
+#: **The** golden-case registry: ``name -> (payload kind, runner)``, in capture
+#: order (dicts preserve insertion order). Everything else about the case set is
+#: derived from this one mapping — the name set the goldens directory is policed
+#: against, the capture order, and which payload builder ``capture_goldens.py``
+#: dispatches to — so a case can never exist in one list and be missing from
+#: another. It used to: a name present in the validation set but absent from the
+#: capture order made ``--only <case>`` a silent no-op that wrote nothing and
+#: exited 0.
+#:
+#: Adding a case is two touchpoints, and no more: an entry here, and a capture.
+#: A case of a *new* kind is three — the kind also needs a payload builder in
+#: ``capture_goldens.PAYLOAD_BUILDERS``, which raises by name if you forget.
+#:
+#: The synthetic entry reuses the named :data:`SYNTHETIC_VARIANTS` spec through
+#: the memoized runner, so the golden and the physics tests cannot drift apart.
+GOLDEN_CASE_REGISTRY = {
+    "example_readme": (KIND_RESULT_MULTIPLETS, run_example_case),
+    "example_xmris_shape": (KIND_RESULT_MULTIPLETS, run_example_xmris_shape_case),
+    "synthetic_noise1_gfree": (
+        KIND_RESULT_MULTIPLETS,
+        lambda: synthetic_variant_result("noise1_gfree")[0],
+    ),
+    HSVD_VENDORED_CASE: (KIND_HSVD_COMPONENTS, run_hsvd_vendored_backend_case),
 }
+
+#: The fit cases only — name -> runner returning the FID object whose
+#: ``result_multiplets`` gets frozen. Derived, never edited: the tests that are
+#: specific to that payload shape parametrize over it.
+GOLDEN_CASES = {
+    name: runner
+    for name, (kind, runner) in GOLDEN_CASE_REGISTRY.items()
+    if kind == KIND_RESULT_MULTIPLETS
+}
+
+#: Every golden name, whatever the payload shape. ``tests/goldens/`` and each of
+#: its platform subdirectories are policed against this set, and
+#: ``capture_goldens.py`` validates ``--only`` against it.
+ALL_GOLDEN_NAMES = frozenset(GOLDEN_CASE_REGISTRY)
+
+#: Capture order, and the order ``--only`` filters.
+CASE_ORDER = list(GOLDEN_CASE_REGISTRY)
 
 _CASE_CACHE: dict = {}
 

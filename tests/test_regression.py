@@ -13,6 +13,12 @@ The fitted parameters and every CRLB column are golden-compared cell by cell aga
 ill-conditioned Fisher matrix through ``pinv``/``lstsq`` and are not reproducible
 across dependency stacks. They are guarded *structurally* instead, below.
 
+Which golden file a run compares against is platform-dependent:
+``tests/goldens/<sys.platform>-<machine>/<case>.json`` wins per file if it exists,
+otherwise the canonical ``tests/goldens/<case>.json`` — captured on darwin-arm64 and
+the reference for every platform that has no override. Every failure message names
+the file it compared.
+
 Tolerances live inside each golden JSON, so loosening one later (say, for cross-BLAS
 drift on a CRLB column) is a data-only edit with a comment — never a code change.
 They are not bit-for-bit and cannot be: numpy's SIMD complex multiply inside
@@ -42,15 +48,86 @@ except ImportError:  # pragma: no cover - direct invocation from inside tests/
 # --------------------------------------------------------------------------------
 
 
+def golden_path(name: str) -> str:
+    """Where this platform reads golden ``name`` from.
+
+    ``tests/goldens/<platform-key>/<name>.json`` wins if it exists, otherwise the
+    canonical ``tests/goldens/<name>.json``. The resolution is **per file**, not
+    per directory: a platform set that only overrides one case leaves every other
+    case reading the canonical arm64 file, which is exactly the behaviour every
+    platform had before platform directories existed.
+    """
+    candidate = os.path.join(rc.platform_goldens_dir(), f"{name}.json")
+    if os.path.exists(candidate):
+        return candidate
+    return os.path.join(rc.GOLDENS_DIR, f"{name}.json")
+
+
 def load_golden(name: str) -> dict:
-    path = os.path.join(rc.GOLDENS_DIR, f"{name}.json")
+    path = golden_path(name)
     if not os.path.exists(path):
         raise AssertionError(
             f"Missing golden {path}. Capture it with:\n"
             f"    python tests/capture_goldens.py --write tests/goldens/"
         )
     with open(path, encoding="utf-8") as handle:
-        return json.load(handle)
+        golden = json.load(handle)
+    # Every failure message below quotes this, so a red run says which of the two
+    # candidate files it actually compared against.
+    golden["_source_path"] = os.path.relpath(path, os.path.dirname(rc.TESTS_DIR))
+    return golden
+
+
+class GoldenComparer:
+    """Cell-by-cell comparison against one golden's tolerance block.
+
+    Shared by both golden families — the ``result_multiplets`` tables and the HSVD
+    decomposition — because they had started to drift apart: two copies of the
+    same resolve-tolerance/isclose/format-the-mismatch loop, one keying its
+    overrides ``per_column`` and the other ``per_field``, with different NaN
+    guards and different message layouts. One helper, one JSON schema.
+
+    ``per_column`` is the schema's name for the override map even where the
+    payload calls its axis something else: the canonical fit goldens are frozen
+    and already spell it that way, so it is the spelling the HSVD golden adopted
+    rather than the other way round.
+
+    Mismatches accumulate instead of raising, so one red run shows every drifted
+    cell — a dependency bump that moves ten metabolites should show all ten, not
+    just the alphabetically first.
+    """
+
+    def __init__(self, tolerances: dict):
+        self.default_rtol = tolerances["default_rtol"]
+        self.default_atol = tolerances.get("default_atol", 0.0)
+        self.per_column = tolerances.get("per_column", {})
+        self.mismatches: list = []
+
+    def tolerances_for(self, column: str):
+        """``(rtol, atol)`` for one column/field, per-column override applied."""
+        override = self.per_column.get(column, {})
+        return (
+            override.get("rtol", self.default_rtol),
+            override.get("atol", self.default_atol),
+        )
+
+    def check(self, label: str, column: str, expected: float, actual: float) -> None:
+        """Compare one cell; record a formatted line if it is out of tolerance."""
+        rtol, atol = self.tolerances_for(column)
+        if np.isclose(actual, expected, rtol=rtol, atol=atol, equal_nan=True):
+            return
+        # A relative deviation is meaningless against zero or NaN; say so rather
+        # than dividing.
+        rel = (
+            abs(actual - expected) / abs(expected)
+            if expected and not math.isnan(expected)
+            else float("nan")
+        )
+        self.mismatches.append(
+            f"  {label:34s} expected {expected!r} got {actual!r} "
+            f"(rel {rel:.3e}, abs {abs(actual - expected):.3e}, "
+            f"rtol {rtol:.1e} atol {atol:.1e})"
+        )
 
 
 @pytest.mark.parametrize("case_name", sorted(rc.GOLDEN_CASES))
@@ -61,6 +138,7 @@ def test_golden_result_multiplets(case_name):
     ten metabolites should show all ten, not just the alphabetically first.
     """
     golden = load_golden(case_name)
+    source = golden["_source_path"]
     df = rc.golden_case_result(case_name).result_multiplets
 
     # Guard the golden against the *live* constants, not against its own copies of
@@ -68,51 +146,57 @@ def test_golden_result_multiplets(case_name):
     # capture run, so it can never fail). If someone edits GOLDEN_COLUMNS or
     # RESULT_MULTIPLETS_COLUMNS without re-capturing, these two lines catch it.
     assert set(golden["values"]) == set(rc.GOLDEN_COLUMNS), (
-        f"{case_name}: the golden freezes {sorted(golden['values'])} but "
+        f"{source}: the golden freezes {sorted(golden['values'])} but "
         f"regression_cases.GOLDEN_COLUMNS says {sorted(rc.GOLDEN_COLUMNS)} — "
         "re-capture the goldens."
     )
     assert golden["columns_exact_order"] == rc.RESULT_MULTIPLETS_COLUMNS, (
-        f"{case_name}: the golden's column order disagrees with "
+        f"{source}: the golden's column order disagrees with "
         "regression_cases.RESULT_MULTIPLETS_COLUMNS — re-capture the goldens."
     )
 
     assert [str(x) for x in df.index] == golden["index"], (
-        f"{case_name}: the metabolite row index changed.\n"
+        f"{source}: the metabolite row index changed.\n"
         f"  expected: {golden['index']}\n"
         f"  actual:   {[str(x) for x in df.index]}"
     )
     assert [str(c) for c in df.columns] == golden["columns_exact_order"], (
-        f"{case_name}: result_multiplets columns changed (label text or order).\n"
+        f"{source}: result_multiplets columns changed (label text or order).\n"
         f"  expected: {golden['columns_exact_order']}\n"
         f"  actual:   {[str(c) for c in df.columns]}"
     )
 
-    tol = golden["tolerances"]
-    per_column = tol.get("per_column", {})
-    mismatches = []
+    comparer = GoldenComparer(golden["tolerances"])
     for column, expected_col in golden["values"].items():
-        rtol = per_column.get(column, {}).get("rtol", tol["default_rtol"])
-        atol = per_column.get(column, {}).get("atol", tol["default_atol"])
         for metabolite, expected in expected_col.items():
-            actual = float(df.at[metabolite, column])
-            if not np.isclose(actual, expected, rtol=rtol, atol=atol, equal_nan=True):
-                rel = (
-                    abs(actual - expected) / abs(expected)
-                    if expected not in (0.0,) and not math.isnan(expected)
-                    else float("nan")
-                )
-                mismatches.append(
-                    f"  {column!r:20s} {metabolite:8s} "
-                    f"expected {expected!r} got {actual!r} (rel {rel:.3e})"
-                )
+            comparer.check(
+                f"{column!r} {metabolite}",
+                column,
+                expected,
+                float(df.at[metabolite, column]),
+            )
 
+    mismatches = comparer.mismatches
     assert not mismatches, (
-        f"{case_name}: {len(mismatches)} golden cell(s) drifted "
-        f"(golden captured on {golden['meta']['python']}/"
-        f"numpy {golden['meta']['numpy']}/pandas {golden['meta']['pandas']}, "
-        f"running on {np.__version__}):\n" + "\n".join(mismatches)
+        f"{case_name}: {len(mismatches)} golden cell(s) drifted against {source} "
+        f"(captured on {golden['meta']['python']}/"
+        f"numpy {golden['meta']['numpy']}/pandas {golden['meta']['pandas']}/"
+        f"{golden['meta']['machine']}, running on numpy {np.__version__}/"
+        f"{rc.platform_goldens_key()}):\n" + "\n".join(mismatches)
     )
+
+
+def _version_tuple(text: str):
+    """``"0.4.0" -> (0, 4, 0)``; ``None`` if any segment is not a plain integer.
+
+    Deliberately not a PEP 440 parser — there is no packaging dependency in this
+    suite, and a version this cannot read simply opts out of the comparison it
+    feeds rather than failing it.
+    """
+    parts = text.split(".")
+    if not all(p.isdigit() for p in parts):
+        return None
+    return tuple(int(p) for p in parts)
 
 
 def test_every_golden_file_has_a_case():
@@ -121,11 +205,96 @@ def test_every_golden_file_has_a_case():
         os.path.splitext(os.path.basename(p))[0]
         for p in glob.glob(os.path.join(rc.GOLDENS_DIR, "*.json"))
     }
-    assert on_disk == set(rc.GOLDEN_CASES), (
-        "tests/goldens/ and regression_cases.GOLDEN_CASES disagree.\n"
-        f"  only on disk: {sorted(on_disk - set(rc.GOLDEN_CASES))}\n"
-        f"  only in code: {sorted(set(rc.GOLDEN_CASES) - on_disk)}"
+    assert on_disk == set(rc.ALL_GOLDEN_NAMES), (
+        "tests/goldens/ and the case set in regression_cases disagree.\n"
+        f"  only on disk: {sorted(on_disk - set(rc.ALL_GOLDEN_NAMES))}\n"
+        f"  only in code: {sorted(set(rc.ALL_GOLDEN_NAMES) - on_disk)}"
     )
+
+
+def test_platform_golden_dirs_are_named_and_populated_correctly():
+    """Every ``tests/goldens/<subdir>/`` is a well-formed platform override set.
+
+    Three rules, all cheap, and all about files *this* platform may never read —
+    which is the point: a wrong linux override is invisible on arm64 until CI
+    goes red, so it gets policed everywhere.
+
+    * The directory name must parse as ``<sys.platform>-<machine>`` (the grammar
+      lives in ``regression_cases``, shared with the capture script), so a stray
+      ``tests/goldens/old/`` cannot masquerade as a platform set that silently
+      never applies.
+    * Its ``*.json`` names must be a **subset** of the case set — a subset, not a
+      bijection, because a platform set is allowed to override only the cases that
+      actually drift there and inherit the rest from the canonical arm64 files.
+      Anything that is not a ``*.json`` is an orphan too, dotfiles excepted:
+      committing a platform set from macOS plants a ``.DS_Store`` next to it, and
+      failing the suite over a Finder artefact would teach people to distrust it.
+    * An override must not be **older than the canonical it shadows**. Nothing
+      else links the two: re-freezing a canonical golden silently leaves every
+      committed override in place, still winning the lookup, still asserting
+      numbers from before the re-freeze. Compared on ``captured_utc`` (fixed-width
+      UTC, so lexicographic order is chronological) and on the recorded pyamares
+      version. Both are "not older", not "equal" — the canonical fit goldens still
+      carry 0.3.33 from the pre-fork capture, so demanding equality would condemn
+      every override captured since.
+    """
+    problems = []
+    for entry in sorted(os.listdir(rc.GOLDENS_DIR)):
+        path = os.path.join(rc.GOLDENS_DIR, entry)
+        if not os.path.isdir(path):
+            continue
+        if not rc.looks_like_platform_dir(entry):
+            problems.append(
+                f"  {entry}/: not a '<sys.platform>-<machine>' directory name "
+                f"(this platform's key is {rc.platform_goldens_key()!r})"
+            )
+            continue
+        names = sorted(n for n in os.listdir(path) if not n.startswith("."))
+        stray = [n for n in names if not n.endswith(".json")]
+        if stray:
+            problems.append(f"  {entry}/: non-golden file(s) {stray}")
+        goldens = [n for n in names if n.endswith(".json")]
+        orphans = sorted(
+            {os.path.splitext(n)[0] for n in goldens} - set(rc.ALL_GOLDEN_NAMES)
+        )
+        if orphans:
+            problems.append(f"  {entry}/: golden(s) with no case {orphans}")
+        for name in goldens:
+            canonical_path = os.path.join(rc.GOLDENS_DIR, name)
+            if not os.path.exists(canonical_path):
+                continue
+            with open(os.path.join(path, name), encoding="utf-8") as handle:
+                override_meta = json.load(handle).get("meta", {})
+            with open(canonical_path, encoding="utf-8") as handle:
+                canonical_meta = json.load(handle).get("meta", {})
+            problems.extend(
+                _stale_override_problems(entry, name, override_meta, canonical_meta)
+            )
+    assert not problems, "malformed platform golden directories:\n" + "\n".join(
+        problems
+    )
+
+
+def _stale_override_problems(entry, name, override_meta, canonical_meta):
+    """Report an override golden that predates the canonical it shadows."""
+    problems = []
+    override_when = override_meta.get("captured_utc")
+    canonical_when = canonical_meta.get("captured_utc")
+    if override_when and canonical_when and override_when < canonical_when:
+        problems.append(
+            f"  {entry}/{name}: captured {override_when}, but the canonical it "
+            f"shadows was re-captured later ({canonical_when}) — re-capture the "
+            "override or drop it."
+        )
+    override_version = _version_tuple(override_meta.get("pyamares", ""))
+    canonical_version = _version_tuple(canonical_meta.get("pyamares", ""))
+    if override_version and canonical_version and override_version < canonical_version:
+        problems.append(
+            f"  {entry}/{name}: captured on pyamares "
+            f"{override_meta['pyamares']}, older than the canonical it shadows "
+            f"({canonical_meta['pyamares']}) — re-capture the override or drop it."
+        )
+    return problems
 
 
 @pytest.mark.parametrize("case_name", sorted(rc.GOLDEN_CASES))
@@ -411,6 +580,75 @@ def test_hsvd_backend_selection():
         f"numpy {np.__version__} (major {numpy_major}), hlsvdpro importable="
         f"{hlsvdpro_importable} should select {expected!r}, but util/hsvd.py bound "
         f"{hsvd_module.hlsvd.__name__!r}"
+    )
+
+
+# --------------------------------------------------------------------------------
+# Case D — the vendored HSVD backend, frozen
+# --------------------------------------------------------------------------------
+
+
+def test_hsvd_vendored_backend_matches_golden():
+    """The vendored pure-Python HSVD decomposition still returns the frozen numbers.
+
+    Unlike the structural Case C tests above, this one *does* freeze values — but
+    of ``pyAMARES.libs.hlsvd.hlsvd`` called directly, so "the two backends differ
+    by design" never applies: whichever backend ``util/hsvd.py`` happens to bind,
+    this test measures the vendored one.
+
+    Tolerances live in the golden and were measured across dependency stacks and
+    platforms; the golden's ``comment`` records the numbers.
+    """
+    golden = load_golden(rc.HSVD_VENDORED_CASE)
+    source = golden["_source_path"]
+    result = rc.run_hsvd_vendored_backend_case()
+
+    # Against the live constant, never against the golden's copy of it.
+    assert golden["component_fields"] == list(rc.HSVD_COMPONENT_FIELDS), (
+        f"{source}: the golden freezes {golden['component_fields']} but "
+        f"regression_cases.HSVD_COMPONENT_FIELDS says "
+        f"{list(rc.HSVD_COMPONENT_FIELDS)} — re-capture the golden."
+    )
+    assert result["nsv_found"] == golden["nsv_found"], (
+        f"{source}: the vendored HSVD backend found {result['nsv_found']} singular "
+        f"value(s), the golden froze {golden['nsv_found']}"
+    )
+
+    components = result["components"]
+    assert len(components) == len(golden["components"]), (
+        f"{source}: the backend returned {len(components)} component(s), the golden "
+        f"froze {len(golden['components'])} — the rest of the comparison is "
+        "meaningless, so it is not attempted."
+    )
+
+    comparer = GoldenComparer(golden["tolerances"])
+    for row, expected_row in enumerate(golden["components"]):
+        for field in rc.HSVD_COMPONENT_FIELDS:
+            comparer.check(
+                f"component[{row}].{field}",
+                field,
+                float(expected_row[field]),
+                float(components.at[row, field]),
+            )
+
+    expected_sv = golden["top_singular_values"]
+    actual_sv = result["top_singular_values"]
+    assert len(actual_sv) == len(expected_sv), (
+        f"{source}: {len(actual_sv)} singular value(s) returned, "
+        f"{len(expected_sv)} frozen"
+    )
+    for i, (expected, actual) in enumerate(zip(expected_sv, actual_sv)):
+        comparer.check(
+            f"singular_value[{i}]", "top_singular_values", expected, float(actual)
+        )
+
+    mismatches = comparer.mismatches
+    assert not mismatches, (
+        f"{rc.HSVD_VENDORED_CASE}: {len(mismatches)} frozen value(s) drifted against "
+        f"{source} (captured on {golden['meta']['python']}/"
+        f"numpy {golden['meta']['numpy']}/scipy {golden['meta']['scipy']}/"
+        f"{golden['meta']['machine']}, running on numpy {np.__version__}/"
+        f"{rc.platform_goldens_key()}):\n" + "\n".join(mismatches)
     )
 
 

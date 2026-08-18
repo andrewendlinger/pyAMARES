@@ -1,0 +1,83 @@
+name: Capture Goldens (linux-x86_64)
+
+# Captures a full golden set on linux x86_64 and uploads it as an artifact. It
+# NEVER commits anything: the artifact is downloaded, REVIEWED BY THE MAINTAINER,
+# and committed by hand into tests/goldens/linux-x86_64/ — a platform override
+# directory that tests/test_regression.py prefers per file over the canonical
+# darwin-arm64 goldens sitting directly in tests/goldens/. An auto-committed
+# golden would defeat the entire point of freezing numbers.
+#
+# What to expect in the diff against the canonical arm64 files: the fit goldens
+# drift up to ~2.3e-3 relative (the example_readme measurement — 41 cells over
+# 1e-4, worst LW(Hz)/UDPG; a re-measurement on 2026-08-18 from this workflow saw
+# 44 cells and 2.53e-3), pure cross-BLAS drift, which is why that one case
+# carries a widened default_rtol. The other two fit cases hold 1e-4 across the
+# platform boundary, and the vendored-HSVD case holds 1e-9. Anything materially
+# larger than that is a finding, not a capture to commit.
+#
+# Manual only, on purpose — nothing about this should ever run on a push.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  capture:
+    name: capture (ubuntu-latest, py3.12)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install the package on the stack the goldens are frozen on
+        # One install, pins and all. test-regression.yml installs twice because
+        # its pins come from a matrix and one leg has none; here the stack is
+        # fixed, so an unpinned install first would only be resolution work
+        # thrown away. The pins sit alongside `-e .` rather than in a second
+        # command for the reason that file spells out: pip has to be free to
+        # backtrack every dependent onto a version they allow (numpy 1.26.4 wants
+        # scipy 1.17.1, not the 1.18 a bare install picks), which it cannot do if
+        # they land on top of an already resolved environment.
+        run: |
+          python -m pip install --upgrade pip setuptools wheel
+          python -m pip install -e . 'numpy==1.26.4' 'pandas==2.1.4'
+
+      - name: Check the environment is internally consistent
+        # A capture taken on a stack that does not hang together is worse than no
+        # capture at all — it would freeze numbers nobody can reproduce.
+        run: python -m pip check
+
+      - name: Print the resolved stack
+        run: python -m pip list
+
+      - name: Capture the goldens
+        # --force because the linux-x86_64 directory may already hold a reviewed
+        # set; re-capturing into a fresh checkout is the whole job. The output
+        # directory is created by capture_goldens.py itself if it does not exist,
+        # and the script refuses a --write named after a platform that is not the
+        # one it is running on — so this path cannot quietly freeze the wrong
+        # machine's numbers if the job is ever moved off ubuntu x86_64.
+        run: python tests/capture_goldens.py --write tests/goldens/linux-x86_64/ --force
+
+      - name: Show what was captured
+        # `git diff` alone shows nothing while the directory is untracked, which
+        # is precisely the state of the first capture. `git status` covers that
+        # era; `git add -N` then makes the *content* diffable, so a re-capture
+        # over an already-committed set shows which numbers actually moved.
+        run: |
+          ls -l tests/goldens/linux-x86_64/
+          git status --short -- tests/goldens/
+          git add -N tests/goldens/linux-x86_64/
+          git --no-pager diff --stat -- tests/goldens/
+
+      - name: Upload the captured goldens for review
+        uses: actions/upload-artifact@v4
+        with:
+          name: goldens-linux-x86_64
+          path: tests/goldens/linux-x86_64/
+          if-no-files-found: error

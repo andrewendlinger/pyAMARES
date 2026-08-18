@@ -15,6 +15,12 @@ Usage
 
 Existing files are never overwritten without ``--force``.
 
+``tests/goldens/`` itself holds the canonical set, captured on darwin-arm64. A
+``tests/goldens/<sys.platform>-<machine>/`` subdirectory (see
+``regression_cases.platform_goldens_key``) overrides the canonical files per file on
+that platform; ``.github/workflows/capture-goldens.yml`` produces such a set for
+linux-x86_64 as a reviewable artifact.
+
 The baseline stack the committed goldens were captured on::
 
     uv run --no-project --python 3.12 --with 'numpy==1.26.4' --with 'pandas==2.1.4' \
@@ -72,6 +78,61 @@ DEFAULT_TOLERANCES = {
 }
 
 
+#: Tolerances for the vendored-HSVD-backend golden. Sized from measurement, not
+#: guessed — :data:`HSVD_COMMENT`, written into the golden itself, records the
+#: configurations that were compared and the drift each one showed.
+#:
+#: Much tighter than :data:`DEFAULT_TOLERANCES` because this case is a single
+#: linear-algebra pass — one SVD, one least-squares solve, one eigendecomposition,
+#: one ``zgelss`` — with no iterative optimizer to amplify a last-ulp difference
+#: into a visible one. The fit goldens go through ``leastsq``/``least_squares``,
+#: which is exactly why they need 1e-4 (and 5e-3 on the real-data case) where this
+#: one holds 1e-9 across every stack and platform measured.
+HSVD_TOLERANCES = {
+    "default_rtol": 1e-9,
+    "default_atol": 0.0,
+    # ``per_column`` even though this payload calls them fields: one tolerance
+    # schema for every golden family, so ``test_regression.py`` resolves both with
+    # the same helper. The frozen fit goldens already spell it this way and cannot
+    # be edited, so this is the name that had to win.
+    "per_column": {
+        # One component sits at -0.0135 Hz, so a relative tolerance says nothing
+        # about it; the floor is what actually guards that cell.
+        "frequency_hz": {"atol": 1e-9},
+        # Same story for that component's phase, which is 0.0989 degrees.
+        "phase_deg": {"atol": 1e-8},
+    },
+}
+
+#: Written into the vendored-HSVD golden as its ``comment``.
+HSVD_COMMENT = (
+    "Tolerances are measured, not guessed. The runner was compared across six "
+    "configurations on 2026-08-18: darwin-arm64 py3.12/numpy 1.26.4/scipy 1.17.1 "
+    "(the capture stack, reference); darwin-arm64 py3.13/numpy 2.5.2/scipy 1.18.0; "
+    "linux-aarch64 and linux-x86_64 py3.12/numpy 1.26.4/scipy 1.17.1 in containers; "
+    "linux-x86_64 py3.13/numpy 2.5.2/scipy 1.18.0 in a container; and a real GitHub "
+    "ubuntu-latest x86_64 runner on py3.12/numpy 1.26.4/scipy 1.17.1 via "
+    "capture-goldens.yml. nsv_found was 8 in every one. Worst relative deviation "
+    "over every frozen value and every configuration: 1.1e-10 — and that maximum "
+    "belongs entirely to the two near-zero cells (the component at -0.0135 Hz and "
+    "its 0.0989 deg phase). The worst on any cell where a relative comparison "
+    "means something is 5.4e-13 (damping), 3.1e-13 (amplitude), 2.6e-13 (phase "
+    "away from zero), 3.7e-15 (frequency away from zero) and 1.9e-15 (singular "
+    "values). default_rtol 1e-9 "
+    "is therefore ~10x the worst measured drift overall and ~1800x the worst "
+    "meaningful one. The two atol floors absorb the near-zero cells: frequency_hz "
+    "1e-9 Hz is ~440x the worst measured absolute frequency drift (2.3e-12 Hz) and "
+    "still 1e-17 ppm at 120 MHz; phase_deg 1e-8 deg is ~870x the worst measured "
+    "absolute phase drift (1.1e-11 deg). damping needs no floor — no component "
+    "comes near zero (|damping| runs 5.8e-3 to 2.0e-2, worst drift 1800x inside "
+    "the default). No phase comes near +-180 deg either (max |phase| 149.4 deg), "
+    "so the comparison is plain rather than angular; an input that put a component "
+    "on the wrap point would need an angular comparison this golden does not "
+    "implement. nmrglue is recorded in meta but is not on this case's code path at "
+    "all — the vendored backend is pure scipy — so its version cannot matter here."
+)
+
+
 def capture_meta() -> dict:
     """Record the stack the goldens were captured on."""
     import lmfit
@@ -120,6 +181,74 @@ def golden_payload(case_name: str, result_multiplets) -> dict:
     }
 
 
+def hsvd_golden_payload(case_name: str, result: dict) -> dict:
+    """Turn :func:`regression_cases.run_hsvd_vendored_backend_case` into a payload.
+
+    A different shape from :func:`golden_payload` on purpose: this case freezes a
+    decomposition (rows of components plus the singular-value head), not a
+    ``result_multiplets`` table, so it carries ``components`` /
+    ``top_singular_values`` rather than ``values`` / ``index`` / column lists.
+    """
+    components = result["components"]
+    missing = [f for f in rc.HSVD_COMPONENT_FIELDS if f not in components.columns]
+    if missing:
+        raise RuntimeError(f"{case_name}: HSVD components lost fields {missing!r}")
+    meta = capture_meta()
+    meta["case"] = case_name
+    return {
+        "meta": meta,
+        "nsv_found": int(result["nsv_found"]),
+        "component_fields": list(rc.HSVD_COMPONENT_FIELDS),
+        # Built from the declared field list, not from the DataFrame's columns: a
+        # column the runner grows later would otherwise be frozen here and never
+        # compared, since the test iterates HSVD_COMPONENT_FIELDS.
+        "components": [
+            {
+                field: float(components.at[row, field])
+                for field in rc.HSVD_COMPONENT_FIELDS
+            }
+            for row in components.index
+        ],
+        "top_singular_values": [float(x) for x in result["top_singular_values"]],
+        "tolerances": json.loads(json.dumps(HSVD_TOLERANCES)),
+        "comment": HSVD_COMMENT,
+    }
+
+
+def _result_multiplets_payload(case_name: str, fidobj) -> dict:
+    """Adapter: a fit runner returns the FID object, not the table."""
+    return golden_payload(case_name, fidobj.result_multiplets)
+
+
+#: Payload kind -> builder, the one thing ``capture_goldens.py`` adds to the case
+#: registry in ``regression_cases``. Looked up by name so a case declaring a kind
+#: nobody can serialise fails loudly at capture time instead of silently.
+PAYLOAD_BUILDERS = {
+    rc.KIND_RESULT_MULTIPLETS: _result_multiplets_payload,
+    rc.KIND_HSVD_COMPONENTS: hsvd_golden_payload,
+}
+
+
+def capture_case(case_name: str) -> dict:
+    """Run one case and return its golden payload, whatever its payload shape."""
+    kind, runner = rc.GOLDEN_CASE_REGISTRY[case_name]
+    try:
+        build = PAYLOAD_BUILDERS[kind]
+    except KeyError:
+        raise RuntimeError(
+            f"{case_name}: payload kind {kind!r} has no builder in "
+            f"capture_goldens.PAYLOAD_BUILDERS (known: {sorted(PAYLOAD_BUILDERS)})"
+        ) from None
+    return build(case_name, runner())
+
+
+def payload_size(payload: dict) -> str:
+    """A one-line 'what got written' description for the capture log."""
+    if "components" in payload:
+        return f"{len(payload['components'])} components"
+    return f"{len(payload['index'])} rows"
+
+
 def write_golden(payload: dict, path: str) -> None:
     """Write one golden JSON at full float precision.
 
@@ -153,14 +282,38 @@ def main(argv=None) -> int:
     )
     args = parser.parse_args(argv)
 
-    unknown = sorted(set(args.only or []) - set(rc.GOLDEN_CASES))
+    unknown = sorted(set(args.only or []) - rc.ALL_GOLDEN_NAMES)
     if unknown:
         parser.error(
-            f"unknown case(s) {unknown!r}; known cases: {sorted(rc.GOLDEN_CASES)}"
+            f"unknown case(s) {unknown!r}; known cases: {sorted(rc.ALL_GOLDEN_NAMES)}"
         )
-    case_names = [n for n in rc.GOLDEN_CASES if not args.only or n in args.only]
+    case_names = [n for n in rc.CASE_ORDER if not args.only or n in args.only]
+    if not case_names:
+        # Unreachable while --only is validated against the same registry the
+        # order comes from. Kept as the belt to that braces: a selection that
+        # writes nothing must never look like a successful capture.
+        parser.error(
+            f"no cases selected; --only {args.only!r} matched none of {rc.CASE_ORDER}"
+        )
 
     outdir = os.path.abspath(args.write)
+
+    # A platform golden set is only meaningful if the numbers in it came from
+    # that platform. Refuse to fill someone else's directory — an arm64 laptop
+    # writing into linux-x86_64/ would freeze the wrong BLAS's output under a
+    # name the test suite trusts on ubuntu. Writing the canonical set (a
+    # directory whose name is not platform-shaped, i.e. tests/goldens/ itself, or
+    # any scratch path) stays allowed: that set is deliberately one platform's
+    # numbers serving every platform.
+    basename = os.path.basename(outdir)
+    if rc.looks_like_platform_dir(basename) and basename != rc.platform_goldens_key():
+        parser.error(
+            f"--write {args.write!r} targets the platform golden set {basename!r}, "
+            f"but this host is {rc.platform_goldens_key()!r}. Capture a platform "
+            "set on its own platform (see .github/workflows/capture-goldens.yml), "
+            "or write to a directory that is not named after a platform."
+        )
+
     os.makedirs(outdir, exist_ok=True)
 
     targets = {name: os.path.join(outdir, f"{name}.json") for name in case_names}
@@ -177,10 +330,9 @@ def main(argv=None) -> int:
 
     rc.quiet()
     for name in case_names:
-        fidobj = rc.GOLDEN_CASES[name]()
-        payload = golden_payload(name, fidobj.result_multiplets)
+        payload = capture_case(name)
         write_golden(payload, targets[name])
-        print(f"wrote {targets[name]}  ({len(payload['index'])} rows)")
+        print(f"wrote {targets[name]}  ({payload_size(payload)})")
     return 0
 
 
