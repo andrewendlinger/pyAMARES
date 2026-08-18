@@ -11,11 +11,11 @@ name: Test Regression Corpus
 # quietly land on a newer numpy or pandas than the leg is meant to exercise —
 # a leg that ran on the wrong stack would be worse than no leg at all.
 #
-# On hlsvdpro: setup.py's PEP 508 marker installs it on the four ubuntu legs
-# (x86_64) and never on the macos one (arm64, no wheel). It is *reported*, not
-# asserted, because installed no longer implies importable — see the comment on
-# the backend step below. util/hsvd.py's own try/except is what keeps that from
-# mattering, and the report step is what keeps it from being invisible.
+# On hlsvdpro: since D18 setup.py does not declare it at all, on any platform, so
+# no leg installs it and every leg runs on the vendored pyAMARES/libs/hlsvd.py
+# backend. The report step below stays: printing "installed: False" on every leg
+# is exactly its job — a user may still install hlsvdpro by hand under numpy<2,
+# and util/hsvd.py still binds it when it is importable.
 
 on:
   workflow_call:
@@ -48,9 +48,9 @@ jobs:
             os: ubuntu-latest
             python-version: '3.14'
             pins: "'pandas>=3,<3.1'"
-          # arm64: setup.py's hlsvdpro marker excludes this platform outright, and
-          # it is the configuration every Apple Silicon dev machine (and every
-          # xmris user on one) actually runs. Deliberately unpinned — plain
+          # arm64: the configuration every Apple Silicon dev machine (and every
+          # xmris user on one) actually runs — the platform whose missing
+          # hlsvdpro wheel this fork exists for. Deliberately unpinned — plain
           # resolution is the point.
           - id: arm64
             os: macos-latest
@@ -95,14 +95,15 @@ jobs:
         run: |
           python -c "import sys, numpy, pandas, scipy, lmfit, nmrglue; print('python', sys.version); print('numpy', numpy.__version__); print('pandas', pandas.__version__); print('scipy', scipy.__version__); print('lmfit', lmfit.__version__); print('nmrglue', nmrglue.__version__)"
 
-      # Reported, never asserted — see the note at the top of this file. On the
-      # ubuntu legs hlsvdpro *installs* (x86_64 satisfies setup.py's marker) but
-      # no longer *imports*: hlsvdpro 2.0.0 does `import pkg_resources` at module
-      # scope, and setuptools >= 82 dropped pkg_resources. util/hsvd.py catches
-      # that ImportError and falls back to the vendored backend, which is why the
-      # corpus stays green. Printing the three facts (installed / importable /
-      # what got bound) puts the whole decision in the log, so the day hlsvdpro
-      # starts or stops importing, the diff in this step says so.
+      # Reported, never asserted — see the note at the top of this file. Since
+      # D18 dropped the declaration, "installed: False" is the expected line on
+      # every leg, and the vendored backend is what util/hsvd.py binds. That was
+      # already the effective behaviour before D18 on the x86_64 legs, where
+      # hlsvdpro installed but did not import: hlsvdpro 2.0.0 does `import
+      # pkg_resources` at module scope and setuptools >= 82 dropped
+      # pkg_resources. Printing the three facts (installed / importable / what
+      # got bound) puts the whole decision in the log, so the day any of them
+      # changes, the diff in this step says so.
       - name: Report the HSVD backend selection
         run: |
           python -c "
