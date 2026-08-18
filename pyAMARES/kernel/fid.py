@@ -53,7 +53,9 @@ def uninterleave(fid):
     elif len(fid.shape) == 2:
         fid2 = fid[::2, :] + fid[1::2, :] * 1j
     else:
-        raise TypeError("This function requires 1D or 2D array!" % fid.shape)
+        raise TypeError(
+            "This function requires 1D or 2D array, got shape %s!" % (fid.shape,)
+        )
     return fid2
 
 

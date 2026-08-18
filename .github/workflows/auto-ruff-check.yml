@@ -2,9 +2,8 @@ name: Auto Ruff Check
 
 on:
   pull_request:
-    branches: [main, dev]
   push:
-    branches: [main, dev]
+    branches: [main, dev, pyamares-xmris]
 
 jobs:
   ruff-check:
