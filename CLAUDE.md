@@ -20,13 +20,21 @@ packaging metadata and, from 0.4.0 on, targeted source fixes.
 
 ## Build & environments
 
-- Metadata lives in legacy **`setup.py`** (no `[project]` table; `pyproject.toml` holds only
-  `[build-system]` and `[tool.ruff]`). The wheel is pure Python (`py3-none-any`).
+- Since D19 all distribution metadata lives in **`pyproject.toml`**'s `[project]` table
+  (PEP 621); **there is no `setup.py`**. The build backend is setuptools (`>=64`, the PEP 660
+  floor) and the wheel is pure Python (`py3-none-any`). `license` deliberately stays the
+  pre-PEP-639 `{text = "BSD-3-Clause"}` table and `license-files` stays under
+  `[tool.setuptools]` — the SPDX form needs setuptools≥77, which dropped py3.8.
 - **Not a uv project** — there must be no committed `uv.lock` (it is gitignored). Test against
   specific stacks with `uv run --no-project --python 3.X --with ... --with .` or scratch venvs
   plus `uv pip install --no-deps -e .`.
-- Version single source of truth: `pyAMARES/__init__.py` (`__version__`), AST-parsed by
-  `setup.py`.
+- `uv run --no-project --with .` may serve a **stale cached wheel** even with
+  `--refresh-package` — for anything that must read the installed copy, use a scratch venv
+  (`uv venv` + `uv pip install -e .`) instead.
+- Version single source of truth: `pyAMARES/__init__.py` (`__version__`), read statically at
+  build time via `[tool.setuptools.dynamic] version = {attr = "pyAMARES.__version__"}` — the
+  package is not imported to build it. `__author__` still lives there too, but the published
+  author metadata is hardcoded in `[project] authors`.
 - Since D18 `install_requires` is only what the package imports — numpy, scipy, pandas,
   matplotlib, lmfit, sympy, nmrglue, jinja2, tqdm. Everything else is an extra: `matlab`
   (mat73, v7.3 `.mat`), `excel` (openpyxl + xlrd, spreadsheet priors), `hlsvd` (hlsvdpro,

@@ -1,8 +1,9 @@
 # Intentionally empty.
 #
-# The dependency metadata for pyamares-xmris lives in setup.py's `install_requires`
-# (and its `extras_require`). This file is kept only so that merges from upstream
-# stay quiet; a second, unversioned copy of the dependency list here would drift out
-# of sync with — and contradict — the metadata that is actually installed.
+# The dependency metadata for pyamares-xmris lives in pyproject.toml's `[project]`
+# table -- `dependencies` and `[project.optional-dependencies]` (it was setup.py's
+# `install_requires`/`extras_require` before D19). This file is kept only so that merges
+# from upstream stay quiet; a second, unversioned copy of the dependency list here would
+# drift out of sync with — and contradict — the metadata that is actually installed.
 #
 # Install with `pip install pyamares-xmris`, or `pip install -e .` from a checkout.
