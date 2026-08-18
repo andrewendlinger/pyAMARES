@@ -7,7 +7,8 @@ name: Test Regression Corpus
 # leg is the claim that those numbers survive a newer stack — and, on the ubuntu
 # legs, a different BLAS. A tests/goldens/<sys.platform>-<machine>/ directory
 # overrides the canonical files per file where one has been captured (see
-# capture-goldens.yml); none exists yet, so every leg reads the canonical set.
+# capture-goldens.yml); tests/goldens/linux-x86_64/ is the first such set, so
+# the ubuntu legs read it while the macOS leg reads the canonical files.
 #
 # Why each leg pins, and pins *after* `pip install -e .`: installing the
 # package first and overriding the stack second means resolution can never

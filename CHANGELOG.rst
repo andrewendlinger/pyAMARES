@@ -1,6 +1,62 @@
 Latest Changes
 --------------
 
+v0.5.0
+~~~~~~
+
+.. note::
+
+   **Fork release** (``pyamares-xmris`` only, like 0.4.0). No numeric change anywhere:
+   every frozen golden value is unchanged through every entry below — the only
+   canonical-golden edit is a tolerance-only revert on ``example_readme``. Ledger
+   entries D17–D21 in `DIVERGENCE.md`_ carry the full analysis and evidence.
+
+**Changed**
+  - ``import pyAMARES`` no longer loads nmrglue, ``matplotlib.pyplot`` or mat73 — they are
+    imported inside the functions that need them, so a broken dependency fails at the call
+    that uses it instead of taking down the whole package, and a default headless fit loads
+    neither nmrglue nor pyplot. Two import-graph tests pin this (a subprocess blocklist and
+    a structural AST scan of the whole package). (D17)
+  - The runtime dependency list is slimmed to what the package imports: numpy, scipy,
+    pandas, matplotlib, lmfit, sympy, ``nmrglue>=0.12``, jinja2, tqdm — 27 distributions
+    in a bare py3.13 venv (pip, wheel and the package itself included), down from 64 for
+    0.4.0. ``ipython``/``ipykernel``/``ipywidgets``/
+    ``requests``/``mat73``/``xlrd`` moved to extras, ``openpyxl`` is newly declared, and
+    ``hlsvdpro`` left the default install on every platform. New extras: ``[matlab]``
+    (MATLAB v7.3 files), ``[excel]`` (``.xlsx``/``.xls`` priors), ``[hlsvd]`` (the
+    compiled HSVD backend — its marker installs it on any x86_64, but it is functional
+    only under py3.8 with numpy 1.x; elsewhere the unimportable wheel is silently
+    bypassed for the vendored backend), and ``[jupyter]``, which
+    together with ``[hlsvd]`` restores the 0.4.0 install. A missing reader now raises an
+    ``ImportError`` naming the extra to install. (D18)
+  - Distribution metadata moved from ``setup.py`` to the PEP 621 ``[project]`` table;
+    ``setup.py`` and ``setup.cfg`` are gone. The version stays single-sourced from
+    ``pyAMARES/__init__.py``. The built wheel was verified field-for-field against the
+    pre-migration build, and CI now builds and ``twine check``-s the distributions on
+    every PR and on pushes to the release branches, the way ``publish.yml`` will at tag
+    time. (D19)
+
+**Fixed**
+  - The notebook progress bar no longer crashes a bare install:
+    ``run_parallel_fitting_with_progress`` falls back to the text bar with a warning when
+    ipywidgets is unavailable. (D18)
+  - ``.xlsx`` prior-knowledge files work again on a documented path: pandas' Excel engine
+    was never declared, so a clean install failed on the recommended prior format;
+    ``openpyxl`` now ships in the ``[excel]`` and ``[jupyter]`` extras and the error
+    message names them. (D18)
+  - ``parameters_to_dataframe_result`` builds its DataFrame once after the loop instead of
+    once per parameter. (D20)
+  - Retroactively recorded: 0.4.0's fix for ``uninterleave``'s error message, whose
+    stray ``%``-format made the ≥3-D error path raise the wrong ``TypeError``. (D21)
+
+**Added**
+  - Platform-matched regression goldens: the frozen arm64 canonical values are untouched,
+    and linux CI legs now compare against a reviewed ``tests/goldens/linux-x86_64/``
+    capture (produced by a manual, maintainer-reviewed capture workflow), restoring tight
+    tolerances on the platform where CI runs. A new golden freezes the vendored HSVD
+    backend's decomposition at rtol 1e-9, with measured cross-stack drift below 1.1e-10
+    overall and 5.4e-13 away from the near-zero cells.
+
 v0.4.0
 ~~~~~~
 
