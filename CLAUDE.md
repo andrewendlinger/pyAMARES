@@ -29,10 +29,11 @@ packaging metadata and, from 0.4.0 on, targeted source fixes.
   `setup.py`.
 - Since D18 `install_requires` is only what the package imports — numpy, scipy, pandas,
   matplotlib, lmfit, sympy, nmrglue, jinja2, tqdm. Everything else is an extra: `matlab`
-  (mat73, v7.3 `.mat`), `excel` (openpyxl + xlrd, spreadsheet priors), `jupyter`
-  (notebook/ipykernel/ipython/ipywidgets/requests + matlab + excel), plus `docs`, `ruff`,
-  `dev`. Install with `.[jupyter]` for anything notebook-shaped; a bare install must stay
-  bare — `.github/workflows/test-install.yml` asserts it.
+  (mat73, v7.3 `.mat`), `excel` (openpyxl + xlrd, spreadsheet priors), `hlsvd` (hlsvdpro,
+  x86_64-marked), `jupyter` (notebook/ipykernel/ipython/ipywidgets/requests + matlab +
+  excel), plus `docs`, `ruff`, `dev`. Install with `.[jupyter]` for anything
+  notebook-shaped; a bare install must stay bare — `.github/workflows/test-install.yml`
+  asserts it.
 - Lint: `ruff check .` and `ruff format --check .` (line length 88; `pyAMARES/libs/hlsvd.py`
   is excluded as vendored third-party code).
 
@@ -69,12 +70,13 @@ do not rename any of them without a coordinated xmris release.
   (`test_no_undocumented_module_level_third_party_imports`, allow-list
   numpy/scipy/pandas/lmfit/jinja2 plus documented per-file exceptions). Put a new heavy
   import in a function body, not at module level. numpy 2 requires `nmrglue>=0.12`.
-- `hlsvdpro` is **not installed at all** since D18 — it is declared neither in
-  `install_requires` nor in any extra. It is dead weight everywhere: it cannot import under
-  setuptools ≥82 (module-scope `import pkg_resources`), and `util/hsvd.py` never imports it
-  under numpy ≥2. The vendored pure-Python `pyAMARES/libs/hlsvd.py` is the live backend on
-  every stack. `util/hsvd.py` is untouched and still binds a *user*-installed hlsvdpro under
-  numpy 1.x — don't "clean up" that try/except.
+- `hlsvdpro` is **not in the default install** since D18 — it lives in its own `hlsvd`
+  extra, carrying D1's x86_64/amd64 marker. It is inert on current stacks: it cannot import
+  under setuptools ≥82 (module-scope `import pkg_resources`), and `util/hsvd.py` never
+  imports it under numpy ≥2, so the vendored pure-Python `pyAMARES/libs/hlsvd.py` is the
+  live backend. The one exception is x86_64 **Python 3.8** with numpy 1.x, where setuptools
+  stays below 82 and `util/hsvd.py` binds hlsvdpro in preference — those users opt back in
+  with `[hlsvd]`. `util/hsvd.py` is untouched; don't "clean up" its try/except.
 - The `sd`, `sd(ppm)`, `sd(Hz)`, `sd(deg)` result columns are **not reproducible across
   dependency stacks** (ill-conditioned Fisher matrix through `pinv`/`lstsq`; up to ~238%
   spread observed). They are guarded structurally only, never golden-compared. Fitted

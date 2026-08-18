@@ -62,13 +62,18 @@ Nothing under `pyAMARES/` is modified. All entries below are `setup.py` metadata
     Upstream:  PR filed, maintainer unresponsive (issue #15)
     Evidence:  verified on arm64 — installs with no hlsvdpro present, hsvd resolves
                to pyAMARES.libs.hlsvd, documented example fit converges
-    Update:    the marker is removed in 0.5.0 by D18 — hlsvdpro is no longer
-               declared at all, on any platform. This entry's outcome is
-               unchanged (a clean install on arm64); what changed is that
-               x86_64 no longer gets a binary nothing can import, since
-               setuptools>=82 removed the pkg_resources that hlsvdpro 2.0.0
-               imports at module scope. util/hsvd.py still binds a
-               user-installed hlsvdpro under numpy<2.
+    Update:    in 0.5.0, D18 moves this requirement — marker and all, verbatim —
+               out of install_requires and into an extra of its own, `hlsvd`. The
+               default install no longer mentions hlsvdpro on any platform. This
+               entry's outcome is unchanged (a clean install on arm64); what
+               changed is that x86_64 no longer gets, by default, a binary that
+               only Python 3.8 environments can import — setuptools >= 82 removed
+               the pkg_resources that hlsvdpro 2.0.0 imports at module scope, and
+               3.8 is the last Python whose setuptools stays below that. Users on
+               x86_64 py3.8 with numpy 1.x, the one configuration where the
+               dependency was ever live, opt back in with
+               `pip install 'pyamares-xmris[hlsvd]'`. util/hsvd.py is untouched
+               and still binds a user-installed hlsvdpro under numpy<2.
 
 ## D2 — `numpy<2.0` and `pandas<2.2` caps
 
@@ -461,7 +466,7 @@ recording this was added.
     Enables:   C5. The import graph is now verifiable, which is the cost that
                entry names as the blocker for moving dependencies behind extras.
 
-## D18 — the runtime dependency list is slimmed; hlsvdpro is dropped
+## D18 — the runtime dependency list is slimmed to what the package imports
 
     Status:    staged for 0.5.0 (unreleased)
     Symptom:   `pip install pyamares-xmris` resolved 62 packages on py3.13 for a
@@ -469,14 +474,14 @@ recording this was added.
                lmfit/sympy/nmrglue. A Jupyter stack (ipython, ipykernel, the two
                ipywidgets marker lines), an HTTP client (requests) and two file
                readers (mat73, xlrd) were installed into every environment that
-               only wanted to fit spectra. hlsvdpro was worse than unused: on
-               x86_64 it installed a binary wheel that cannot import at all —
-               hlsvdpro 2.0.0 does `import pkg_resources` at module scope and
-               setuptools >= 82 removed pkg_resources, so util/hsvd.py's
-               except-ImportError silently bound the vendored backend anyway
-               (C5's 2026-08-18 update, found wiring the regression CI and
-               verified on real linux/amd64: it imports only with
-               `setuptools<82` force-installed). And openpyxl, which pandas
+               only wanted to fit spectra. hlsvdpro was worse than unused on
+               almost every stack: on x86_64 it installed a binary wheel that
+               cannot import — hlsvdpro 2.0.0 does `import pkg_resources` at
+               module scope and setuptools >= 82 removed pkg_resources, so
+               util/hsvd.py's except-ImportError silently bound the vendored
+               backend anyway (C5's 2026-08-18 update, found wiring the
+               regression CI and verified on real linux/amd64: it imports only
+               with `setuptools<82` force-installed). And openpyxl, which pandas
                needs to read the .xlsx priors this package documents as its
                primary input format, was never declared at all — a clean install
                could read a CSV prior and not an Excel one (issue #12).
@@ -487,17 +492,27 @@ recording this was added.
                Demoted to extras: ipython, ipykernel, ipywidgets (both marker
                lines), requests, mat73, xlrd. Newly declared: openpyxl, behind
                the same extra as xlrd — that is the fix for issue #12.
-               Dropped outright: hlsvdpro. It is not declared under any extra,
-               because there is no environment where installing it helps: it
-               cannot import under setuptools>=82 anywhere, and util/hsvd.py
-               never imports it under numpy>=2. D1's PEP 508 marker goes with
-               it. util/hsvd.py is untouched and still binds a *user*-installed
-               hlsvdpro under numpy<2 — the mechanism stays, only the
-               declaration goes.
+               Demoted out of the default install, to an extra of its own:
+               hlsvdpro, carrying D1's marker unchanged. It is in no other extra
+               — not jupyter, not dev — because it is a niche numeric opt-in, and
+               because on nearly every environment it is inert: it cannot import
+               under setuptools >= 82, and util/hsvd.py never looks for it under
+               numpy >= 2. There is exactly one live configuration left, and it
+               is the reason the extra exists rather than nothing at all:
+               **x86_64 Python 3.8 with numpy 1.x**. setuptools stopped
+               supporting 3.8 after the 75.x line, so a 3.8 environment resolves
+               setuptools < 82, pkg_resources is present, hlsvdpro imports, and
+               util/hsvd.py binds it in preference to the vendored copy. Such a
+               user upgrading 0.4.0 -> 0.5.0 therefore *does* change HSVD
+               backend unless they install `pyamares-xmris[hlsvd]`; that is the
+               documented opt-back-in. On any modern stack the extra installs a
+               wheel that raises on import and util/hsvd.py's except-ImportError
+               steps over it — harmless, and no worse than 0.4.0 was.
                Extras layout (plain list concatenation, not self-referential
                extras, so the metadata stays readable on old pip):
                  matlab  = mat73
                  excel   = openpyxl, xlrd
+                 hlsvd   = hlsvdpro>=2.0.0 (x86_64/amd64 marker, D1)
                  jupyter = notebook, ipykernel, ipython, ipywidgets (markers),
                            requests + matlab + excel
                  docs    = unchanged
@@ -510,35 +525,61 @@ recording this was added.
     Behaviour: a bare install now *fails* on two paths it used to serve, with a
                message naming the extra rather than a bare ModuleNotFoundError:
                  fileio/readmat.py::readmrs and fileio/readfidall.py::read_fidall
-                 — the v7.3 (HDF5) .mat branch, chained from mat73's ImportError:
-                 "Reading MATLAB v7.3 .mat files requires mat73. Install it with:
-                 pip install 'pyamares-xmris[matlab]'". Traditional .mat files go
-                 through scipy.io and are unaffected.
+                 — the v7.3 (HDF5) .mat branch, chained from mat73's
+                 ModuleNotFoundError: "Reading MATLAB v7.3 .mat files requires
+                 mat73. Install it with: pip install 'pyamares-xmris[matlab]'".
+                 Traditional .mat files go through scipy.io and are unaffected.
                  kernel/PriorKnowledge.py::generateparameter — the .xlsx/.xls
                  branch, chained from pandas' own "Missing optional dependency"
                  ImportError, naming `pyamares-xmris[excel]` and pointing at CSV
                  as the no-extra way out.
+               Both guards are deliberately narrow about *which* failure they
+               reinterpret. The mat73 ones catch ModuleNotFoundError only, so an
+               installed-but-broken mat73 (an h5py ABI mismatch, say) keeps its
+               own message instead of being misreported as a missing extra. The
+               Excel one has to catch ImportError, because that is what pandas
+               raises for a missing *and* for a too-old engine — so its message
+               says "missing or too old" and offers upgrade as well as install.
                D17 is what makes those the only two: it moved every heavy import
                into the function body that needs it *first*, so no demotion can
                turn into an import-time failure of the whole package. That
                ordering is the entire safety argument for this entry.
-               tqdm stays a hard dependency, so progress bars are unaffected;
-               without ipywidgets, tqdm.notebook degrades to the text bar with a
-               warning, which is tqdm's own documented fallback and needs no code
-               change here. IPython was already imported defensively in
-               PriorKnowledge.py. requests is imported only by
+               tqdm stays a hard dependency, so the progress bars stay — but the
+               notebook bar needed a code change, added here. `tqdm.notebook`
+               does *not* degrade on its own: without ipywidgets it imports
+               cleanly and then raises ImportError("IProgress not found...") from
+               `status_printer` when the first bar is constructed (measured on
+               tqdm 4.70.0). In util/multiprocessing.py that construction happens
+               inside `run_parallel_fitting_with_progress` — public API, exported
+               top level, `notebook=True` by default — after the process pool has
+               already been filled, so demoting ipywidgets would have crashed a
+               parallel fit that worked in every earlier release. The selection
+               now lives in `_select_tqdm`, which reads tqdm's own `IProgress`
+               flag and falls back to the text bar with a warning naming
+               `pyamares-xmris[jupyter]`. IPython was already imported
+               defensively in PriorKnowledge.py. requests is imported only by
                script/amaresfit_gui.py, which nothing in the package imports.
     Restores:  `pip install 'pyamares-xmris[jupyter]'` is a superset of the 0.4.0
-               install minus hlsvdpro (dead in every environment), plus notebook
-               and openpyxl. Nobody who installs the extra loses anything.
-    Guarded:   three tests in tests/test_api_surface.py simulate the absent
-               dependency rather than requiring it to be absent, so they assert
-               the same thing on a bare install and under [jupyter]: mat73 is
-               made unimportable via `sys.modules["mat73"] = None` for both v7.3
-               branches, and pandas' read_excel is monkeypatched to raise the
-               real "Missing optional dependency 'openpyxl'" ImportError. Each
-               asserts the extra's name in the message and that the original
-               error survives as `__cause__`.
+               install minus hlsvdpro, plus notebook and openpyxl; add `,hlsvd`
+               and it is a superset of 0.4.0 outright on x86_64 — which is where
+               0.4.0 installed hlsvdpro at all. Nobody who installs
+               `[jupyter,hlsvd]` loses anything.
+    Guarded:   eight tests in tests/test_api_surface.py, all of which simulate the
+               absent dependency rather than requiring it to be absent, so they
+               assert the same thing on a bare install and under [jupyter]:
+                 - both v7.3 branches with mat73 made unimportable via
+                   `sys.modules["mat73"] = None`, asserting the extra's name and
+                   that the ModuleNotFoundError survives as `__cause__`
+                 - a *broken* mat73 (an ImportError that is not a
+                   ModuleNotFoundError, injected through builtins.__import__),
+                   asserting its own message reaches the caller untouched
+                 - the Excel branch with pandas' read_excel monkeypatched to raise
+                   the real "Missing optional dependency 'openpyxl'" ImportError
+                 - four on `_select_tqdm`: the two fallback routes (tqdm's
+                   IProgress set to None, and tqdm.notebook made unimportable),
+                   each asserting the text class is chosen and that the warning
+                   names the extra; that the notebook class is still chosen when
+                   ipywidgets is usable; and that notebook=False is honoured
                CI: `.github/workflows/test-install.yml` asserts after a plain
                `pip install .` that none of IPython, ipykernel, ipywidgets,
                requests, mat73, xlrd, openpyxl, hlsvdpro or notebook resolves
@@ -554,18 +595,22 @@ recording this was added.
                fonttools, kiwisolver, lmfit, matplotlib, mpmath, nmrglue, numpy,
                packaging, pandas, pillow, pip, pyamares-xmris, pyparsing,
                python-dateutil, scipy, six, sympy, tqdm, uncertainties, wheel.
-               The corpus (55 tests + the 3 new ones) is green on that bare
-               py3.13 install, with all nine demoted names confirmed absent via
+               The corpus (55 tests + 9 new ones, of which one skips where
+               ipywidgets is absent) is green on that bare py3.13 install, with
+               all nine demoted names confirmed absent via
                importlib.util.find_spec, and on the frozen golden stack (py3.12 /
-               numpy 1.26.4 / pandas 2.1.4) — 58 passed either way, every golden
-               untouched. All six example notebooks pass under `.[jupyter]` (93
-               cells, step1_download's requests included). The published metadata
-               was read back out of the built wheel's METADATA, not just off
-               setup.py.
+               numpy 1.26.4 / pandas 2.1.4) — 63 passed, 1 skipped either way,
+               every golden untouched. All six example notebooks pass under
+               `.[jupyter]` (93 cells, step1_download's requests included).
+               `.[hlsvd]` resolves on arm64 and correctly installs nothing (the
+               marker), leaving util/hsvd.py on the vendored backend. The
+               published metadata was read back out of the built wheel's
+               METADATA, not just off setup.py.
     Resolves:  C5
-    Supersedes: D1 — the marker it introduced is gone, because the dependency it
-               qualified is gone. The arm64 install problem D1 fixed stays fixed,
-               more simply than before.
+    Supersedes: D1's placement, not its content — the marker moves verbatim from
+               install_requires to the `hlsvd` extra. The arm64 install problem D1
+               fixed stays fixed, now twice over: the marker still excludes arm64,
+               and the default install does not mention hlsvdpro at all.
 
 ---
 
@@ -674,13 +719,17 @@ Not commitments. Recorded so the cost is known when the question comes up.
 ## C5 — dependency slimming (deliberately out of 0.4.0) — RESOLVED in 0.5.0
 
     Resolution: taken in 0.5.0 as D18, in the shape this entry sketched. Every
-               candidate named below is now behind an extra, hlsvdpro is dropped
-               outright rather than demoted (there is no environment where
-               installing it helps), and the double-declared ipykernel is gone.
-               The extras are additive, so `pyamares-xmris[jupyter]` reproduces
-               the 0.4.0 install minus hlsvdpro, plus notebook and openpyxl. The
+               candidate named below is now behind an extra, including hlsvdpro,
+               which gets one of its own rather than staying in the default
+               install — it is inert everywhere except x86_64 py3.8 with numpy
+               1.x, which is exactly who the `hlsvd` extra is for. The
+               double-declared ipykernel is gone. The extras are additive, so
+               `pyamares-xmris[jupyter,hlsvd]` reproduces the 0.4.0 install. The
                cost this entry names — import-graph verification — was paid
-               first, by D17.
+               first, by D17. One correction to the note below: hlsvdpro is dead
+               weight on every *current* stack, not literally every stack; a
+               Python 3.8 environment caps setuptools below 82 and imports it
+               fine.
 
     Status:    resolved by D18 — history below
     Symptom:   `pip install pyamares-xmris` pulls a Jupyter stack and an HTTP
