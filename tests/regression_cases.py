@@ -15,6 +15,8 @@ dependence.
 from __future__ import annotations
 
 import os
+import platform
+import sys
 
 # Since D17, `import pyAMARES` no longer pulls in matplotlib.pyplot -- but the fits
 # themselves still can (any ifplot/preview path, and report_amares -> util/crlb.py),
@@ -36,6 +38,27 @@ EXAMPLE_FID_PATH = os.path.join(TESTS_DIR, "fid.txt")
 EXAMPLE_PRIOR_PATH = os.path.join(TESTS_DIR, "example_human_brain_31P_7T.csv")
 SYNTHETIC_PRIOR_PATH = os.path.join(TESTS_DIR, "priors", "synthetic_3peak.csv")
 GOLDENS_DIR = os.path.join(TESTS_DIR, "goldens")
+
+
+def platform_goldens_key() -> str:
+    """The directory name a platform-specific golden set lives under.
+
+    ``"<sys.platform>-<machine>"`` — ``darwin-arm64``, ``linux-x86_64``. The
+    canonical goldens sitting directly in ``tests/goldens/`` were captured on
+    ``darwin-arm64`` and remain the reference for every platform; a
+    ``tests/goldens/<key>/`` directory overrides them *per file* where one has
+    been captured and reviewed. Nothing is generated from this key — it only
+    names a lookup — so an unknown platform simply falls back to the canonical
+    files, which is the behaviour every platform had before platform
+    directories existed.
+    """
+    return f"{sys.platform}-{platform.machine()}"
+
+
+def platform_goldens_dir() -> str:
+    """Absolute path of :func:`platform_goldens_key`'s directory (may not exist)."""
+    return os.path.join(GOLDENS_DIR, platform_goldens_key())
+
 
 # --- Case A: the documented README quick-start acquisition parameters -------------
 EXAMPLE_MHZ = 120.0

@@ -13,6 +13,12 @@ The fitted parameters and every CRLB column are golden-compared cell by cell aga
 ill-conditioned Fisher matrix through ``pinv``/``lstsq`` and are not reproducible
 across dependency stacks. They are guarded *structurally* instead, below.
 
+Which golden file a run compares against is platform-dependent:
+``tests/goldens/<sys.platform>-<machine>/<case>.json`` wins per file if it exists,
+otherwise the canonical ``tests/goldens/<case>.json`` — captured on darwin-arm64 and
+the reference for every platform that has no override. Every failure message names
+the file it compared.
+
 Tolerances live inside each golden JSON, so loosening one later (say, for cross-BLAS
 drift on a CRLB column) is a data-only edit with a comment — never a code change.
 They are not bit-for-bit and cannot be: numpy's SIMD complex multiply inside
@@ -27,6 +33,7 @@ import glob
 import json
 import math
 import os
+import re
 
 import numpy as np
 import pytest
@@ -42,15 +49,34 @@ except ImportError:  # pragma: no cover - direct invocation from inside tests/
 # --------------------------------------------------------------------------------
 
 
+def golden_path(name: str) -> str:
+    """Where this platform reads golden ``name`` from.
+
+    ``tests/goldens/<platform-key>/<name>.json`` wins if it exists, otherwise the
+    canonical ``tests/goldens/<name>.json``. The resolution is **per file**, not
+    per directory: a platform set that only overrides one case leaves every other
+    case reading the canonical arm64 file, which is exactly the behaviour every
+    platform had before platform directories existed.
+    """
+    candidate = os.path.join(rc.platform_goldens_dir(), f"{name}.json")
+    if os.path.exists(candidate):
+        return candidate
+    return os.path.join(rc.GOLDENS_DIR, f"{name}.json")
+
+
 def load_golden(name: str) -> dict:
-    path = os.path.join(rc.GOLDENS_DIR, f"{name}.json")
+    path = golden_path(name)
     if not os.path.exists(path):
         raise AssertionError(
             f"Missing golden {path}. Capture it with:\n"
             f"    python tests/capture_goldens.py --write tests/goldens/"
         )
     with open(path, encoding="utf-8") as handle:
-        return json.load(handle)
+        golden = json.load(handle)
+    # Every failure message below quotes this, so a red run says which of the two
+    # candidate files it actually compared against.
+    golden["_source_path"] = os.path.relpath(path, os.path.dirname(rc.TESTS_DIR))
+    return golden
 
 
 @pytest.mark.parametrize("case_name", sorted(rc.GOLDEN_CASES))
@@ -61,6 +87,7 @@ def test_golden_result_multiplets(case_name):
     ten metabolites should show all ten, not just the alphabetically first.
     """
     golden = load_golden(case_name)
+    source = golden["_source_path"]
     df = rc.golden_case_result(case_name).result_multiplets
 
     # Guard the golden against the *live* constants, not against its own copies of
@@ -68,22 +95,22 @@ def test_golden_result_multiplets(case_name):
     # capture run, so it can never fail). If someone edits GOLDEN_COLUMNS or
     # RESULT_MULTIPLETS_COLUMNS without re-capturing, these two lines catch it.
     assert set(golden["values"]) == set(rc.GOLDEN_COLUMNS), (
-        f"{case_name}: the golden freezes {sorted(golden['values'])} but "
+        f"{source}: the golden freezes {sorted(golden['values'])} but "
         f"regression_cases.GOLDEN_COLUMNS says {sorted(rc.GOLDEN_COLUMNS)} — "
         "re-capture the goldens."
     )
     assert golden["columns_exact_order"] == rc.RESULT_MULTIPLETS_COLUMNS, (
-        f"{case_name}: the golden's column order disagrees with "
+        f"{source}: the golden's column order disagrees with "
         "regression_cases.RESULT_MULTIPLETS_COLUMNS — re-capture the goldens."
     )
 
     assert [str(x) for x in df.index] == golden["index"], (
-        f"{case_name}: the metabolite row index changed.\n"
+        f"{source}: the metabolite row index changed.\n"
         f"  expected: {golden['index']}\n"
         f"  actual:   {[str(x) for x in df.index]}"
     )
     assert [str(c) for c in df.columns] == golden["columns_exact_order"], (
-        f"{case_name}: result_multiplets columns changed (label text or order).\n"
+        f"{source}: result_multiplets columns changed (label text or order).\n"
         f"  expected: {golden['columns_exact_order']}\n"
         f"  actual:   {[str(c) for c in df.columns]}"
     )
@@ -108,11 +135,19 @@ def test_golden_result_multiplets(case_name):
                 )
 
     assert not mismatches, (
-        f"{case_name}: {len(mismatches)} golden cell(s) drifted "
-        f"(golden captured on {golden['meta']['python']}/"
-        f"numpy {golden['meta']['numpy']}/pandas {golden['meta']['pandas']}, "
-        f"running on {np.__version__}):\n" + "\n".join(mismatches)
+        f"{case_name}: {len(mismatches)} golden cell(s) drifted against {source} "
+        f"(captured on {golden['meta']['python']}/"
+        f"numpy {golden['meta']['numpy']}/pandas {golden['meta']['pandas']}/"
+        f"{golden['meta']['machine']}, running on numpy {np.__version__}/"
+        f"{rc.platform_goldens_key()}):\n" + "\n".join(mismatches)
     )
+
+
+#: A platform golden directory is named ``<sys.platform>-<machine>``, the exact
+#: string :func:`regression_cases.platform_goldens_key` builds. Both halves are
+#: lowercase words that may carry digits, underscores or dots (``linux-x86_64``,
+#: ``darwin-arm64``, ``win32-AMD64`` — hence the case-insensitive machine half).
+PLATFORM_DIR_RE = re.compile(r"^[a-z][a-z0-9]*-[A-Za-z0-9_.]+$")
 
 
 def test_every_golden_file_has_a_case():
@@ -125,6 +160,46 @@ def test_every_golden_file_has_a_case():
         "tests/goldens/ and regression_cases.GOLDEN_CASES disagree.\n"
         f"  only on disk: {sorted(on_disk - set(rc.GOLDEN_CASES))}\n"
         f"  only in code: {sorted(set(rc.GOLDEN_CASES) - on_disk)}"
+    )
+
+
+def test_platform_golden_dirs_are_named_and_populated_correctly():
+    """Every ``tests/goldens/<subdir>/`` is a well-formed platform override set.
+
+    Two rules, both cheap and both about files this platform may never read:
+
+    * the directory name must parse as ``<sys.platform>-<machine>``, so a stray
+      ``tests/goldens/old/`` cannot masquerade as a platform set that silently
+      never applies;
+    * its ``*.json`` names must be a **subset** of the case set — a subset, not a
+      bijection, because a platform set is allowed to override only the cases that
+      actually drift there and inherit the rest from the canonical arm64 files.
+
+    Anything that is not a ``*.json`` in such a directory is an orphan too.
+    """
+    problems = []
+    for entry in sorted(os.listdir(rc.GOLDENS_DIR)):
+        path = os.path.join(rc.GOLDENS_DIR, entry)
+        if not os.path.isdir(path):
+            continue
+        if not PLATFORM_DIR_RE.match(entry):
+            problems.append(
+                f"  {entry}/: not a '<sys.platform>-<machine>' directory name "
+                f"(this platform's key is {rc.platform_goldens_key()!r})"
+            )
+            continue
+        names = sorted(os.listdir(path))
+        stray = [n for n in names if not n.endswith(".json")]
+        if stray:
+            problems.append(f"  {entry}/: non-golden file(s) {stray}")
+        orphans = sorted(
+            {os.path.splitext(n)[0] for n in names if n.endswith(".json")}
+            - set(rc.GOLDEN_CASES)
+        )
+        if orphans:
+            problems.append(f"  {entry}/: golden(s) with no case {orphans}")
+    assert not problems, "malformed platform golden directories:\n" + "\n".join(
+        problems
     )
 
 

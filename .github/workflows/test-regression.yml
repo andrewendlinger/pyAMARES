@@ -3,8 +3,11 @@ name: Test Regression Corpus
 # Runs the numeric regression corpus (tests/test_regression.py +
 # tests/test_api_surface.py) across the dependency stacks the fork claims to
 # support. The goldens under tests/goldens/ were captured on the `old-stack`
-# combination (py3.12 / numpy 1.26.4 / pandas 2.1.4); every other leg is the
-# claim that those numbers survive a newer stack.
+# combination (py3.12 / numpy 1.26.4 / pandas 2.1.4) on darwin-arm64; every other
+# leg is the claim that those numbers survive a newer stack — and, on the ubuntu
+# legs, a different BLAS. A tests/goldens/<sys.platform>-<machine>/ directory
+# overrides the canonical files per file where one has been captured (see
+# capture-goldens.yml); none exists yet, so every leg reads the canonical set.
 #
 # Why each leg pins, and pins *after* `pip install -e .`: installing the
 # package first and overriding the stack second means resolution can never
@@ -117,6 +120,27 @@ jobs:
               print('hlsvdpro importable: False ->', exc)
           import pyAMARES.util.hsvd as hsvd
           print('util/hsvd.py bound:', hsvd.hlsvd.__name__)
+          "
+
+      # Reported, never asserted — same philosophy as the step above. The
+      # canonical goldens in tests/goldens/ were captured on darwin-arm64 and
+      # serve every platform unless a tests/goldens/<key>/ directory overrides
+      # them per file. Printing the key and whether that directory exists means
+      # the log always says which goldens a leg actually compared against, so the
+      # day a linux-x86_64 set lands, the change in this line is the evidence.
+      - name: Report the platform golden selection
+        run: |
+          python -c "
+          import os, sys
+          sys.path.insert(0, 'tests')
+          import regression_cases as rc
+          key = rc.platform_goldens_key()
+          d = rc.platform_goldens_dir()
+          print('platform goldens key:', key)
+          print('platform goldens dir:', d)
+          print('platform goldens dir exists:', os.path.isdir(d))
+          if os.path.isdir(d):
+              print('platform goldens present:', sorted(os.listdir(d)))
           "
 
       - name: Run the regression corpus
