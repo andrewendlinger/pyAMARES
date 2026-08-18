@@ -358,7 +358,7 @@ recording this was added.
                crlb import in util/report.py, the IPython import in
                kernel/PriorKnowledge.py, the tqdm import in
                util/multiprocessing.py, the nibabel import in
-               fileio/readnifti.py). Eight files:
+               fileio/readnifti.py). Nine files:
                  kernel/fid.py           nmrglue -> fft_params, process_fid,
                                          simulate_fid; pyplot -> the ifplot /
                                          preview blocks
@@ -371,13 +371,31 @@ recording this was added.
                  util/hsvd.py            nmrglue -> HSVDp0; pyplot -> HSVDp0's
                                          ifplot block and HSVDinitializer's
                                          preview block
+                 util/crlb.py            pyplot -> evaluateCRB's verbose block and
+                                         create_pmatrix's ifplot block
                  fileio/readfidall.py    mat73 -> read_fidall's v7.3 branch
                  fileio/readmat.py       mat73 -> readmrs' v7.3 branch
-               pyplot always lands in the narrowest plotting block, so a headless
-               fit never loads it; nmrglue lands at the top of the function body.
+               pyplot always lands in the narrowest plotting block. util/crlb.py
+               is the one that makes that worth anything: every fitAMARES call
+               runs report_amares, which reaches crlb through util/report.py's
+               delayed import, so leaving pyplot at crlb's module scope would
+               have kept the whole plotting stack on the critical path of a
+               headless fit.
+               nmrglue lands at the top of the function body, except in
+               fft_params, where it sits *below* the return_mat / fid=True early
+               returns: those two branches are the ones a fit takes (kernel/
+               lmfit.py:487,504,548,559 and PriorKnowledge.py:665 all pass
+               fid=True or return_mat=True), so the import must not sit above
+               them. With that placement a default headless fit imports no
+               nmrglue at all — measured, see Behaviour.
     Not moved: util/report.py's `try: import jinja2` probe — it is a core
                dependency and its result feeds the module-level `if_style` flag
                that the styled-table path reads.
+               util/crlb.py's sympy — it *is* the CRLB algebra (create_pmatrix
+               parses the prior-knowledge expressions with sympy_parser), so no
+               call into that module does not want it, and the module itself is
+               only ever reached at first-report time. Measured: a default
+               headless fit loads sympy and nothing else from the guarded list.
                util/hsvd.py's backend selection (hlsvdpro vs the vendored
                pyAMARES/libs/hlsvd) — which backend the module binds is an
                import-time rule, and that rule is what
@@ -387,8 +405,8 @@ recording this was added.
                matplotlib.pyplot rather than bare matplotlib: the bare package
                loads on `import pyAMARES` no matter what this repo does, and the
                expensive half is pyplot.
-    Behaviour: numerics identical — the 53-test corpus is green and every golden
-               is byte-identical, on the frozen py3.12 / numpy 1.26.4 /
+    Behaviour: numerics identical — the corpus is green and every golden is
+               byte-identical, on the frozen py3.12 / numpy 1.26.4 /
                pandas 2.1.4 stack and on an unpinned py3.13 resolution. Three
                timing differences, all deliberate:
                  1. an import error in nmrglue / matplotlib / mat73 now surfaces
@@ -396,20 +414,43 @@ recording this was added.
                  2. MPLBACKEND, or matplotlib.use(), set *after* `import
                     pyAMARES` is now honoured — previously pyplot had already
                     chosen a backend by then
-                 3. incidental module attributes are gone: pyAMARES.kernel.fid.plt,
-                    .ng, pyAMARES.util.visualization.plt/.ng, and the same on
+                 3. incidental module attributes are gone: pyAMARES.kernel.fid.plt
+                    and .ng, kernel.objective_func.ng, kernel.PriorKnowledge.plt,
+                    util.visualization.plt/.ng, util.crlb.plt, and the same on
                     libs/MPFIR.py, util/hsvd.py, fileio/readfidall.py,
                     fileio/readmat.py. None is public API and none is in
                     __all__, but a consumer reaching through the module
                     namespace for them breaks.
+               Measured, py3.13 / numpy 2.5.2 / pandas 3.0.5: `import pyAMARES`
+               loads none of the guarded modules, and a default headless
+               fitAMARES adds only sympy (see Not moved). On the frozen py3.12
+               stack the same fit also ends up with matplotlib.pyplot — imported
+               by *pandas*, not by pyAMARES: pandas 2.1.4's
+               pandas/io/formats/style.py has a module-scope `import
+               matplotlib.pyplot as plt`, and report_amares touches
+               `DataFrame.style`. pandas 3 dropped that, and nothing this repo
+               can do would have avoided it.
                Per-call cost: kernel/objective_func.objective_range is a fit-loop
                callback when fit_range is set, so its import runs once per
                residual evaluation — a resolved import is one sys.modules dict
                lookup, negligible against the FFT on the next line.
-    Guarded:   tests/test_api_surface.py::test_bare_import_keeps_heavy_modules_unloaded
-               imports pyAMARES in a subprocess and asserts that none of
+    Guarded:   two tests in tests/test_api_surface.py, deliberately overlapping.
+               test_bare_import_keeps_heavy_modules_unloaded imports pyAMARES in
+               a child process (handed this process' sys.path, so it resolves the
+               same package pytest did) and asserts that none of
                matplotlib.pyplot, nmrglue, mat73, sympy, IPython, tqdm, requests,
-               xlrd, openpyxl or nibabel is in sys.modules afterwards.
+               xlrd, openpyxl or nibabel is in sys.modules afterwards — a fixed
+               blocklist, with the better failure message.
+               test_no_undocumented_module_level_third_party_imports is the
+               open-ended half: it AST-scans pyAMARES/**/*.py and fails on any
+               module-scope import of a distribution outside
+               {numpy, scipy, pandas, lmfit, jinja2} plus the two documented
+               per-file exceptions (hlsvdpro in util/hsvd.py, sympy in
+               util/crlb.py). pyAMARES/script/ is excluded — nothing in the
+               package imports it, and amaresfit_gui.py carries streamlit,
+               requests and matplotlib at module scope by design. So an upstream
+               cherry-pick that adds a module-level import of something nobody
+               has thought of yet fails here rather than shipping.
     Enables:   C5. The import graph is now verifiable, which is the cost that
                entry names as the blocker for moving dependencies behind extras.
 

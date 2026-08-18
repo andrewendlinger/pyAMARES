@@ -58,9 +58,11 @@ do not rename any of them without a coordinated xmris release.
   use — they are imported inside the function bodies that need them, so a broken one now
   fails at that call instead of at import. Bare `matplotlib` still loads (lmfit imports it
   at module scope), and so does jinja2 (`util/report.py` probes it by design).
-  `tests/test_api_surface.py::test_bare_import_keeps_heavy_modules_unloaded` pins the
-  import graph — put a new heavy import in a function body, not at module level. numpy 2
-  requires `nmrglue>=0.12`.
+  Two tests in `tests/test_api_surface.py` pin the import graph — a fixed blocklist
+  (`test_bare_import_keeps_heavy_modules_unloaded`) and an AST scan of `pyAMARES/**`
+  (`test_no_undocumented_module_level_third_party_imports`, allow-list
+  numpy/scipy/pandas/lmfit/jinja2 plus documented per-file exceptions). Put a new heavy
+  import in a function body, not at module level. numpy 2 requires `nmrglue>=0.12`.
 - `hlsvdpro` is optional by design: `util/hsvd.py` never imports it under numpy ≥2 (the
   vendored pure-Python `pyAMARES/libs/hlsvd.py` is used), and falls back to the vendored copy
   when it is absent under numpy 1.x. Its PEP 508 marker restricts it to x86_64/amd64 — it
