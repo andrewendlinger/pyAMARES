@@ -603,9 +603,11 @@ recording this was added.
                every golden untouched. All six example notebooks pass under
                `.[jupyter]` (93 cells, step1_download's requests included).
                `.[hlsvd]` resolves on arm64 and correctly installs nothing (the
-               marker), leaving util/hsvd.py on the vendored backend. The
-               published metadata was read back out of the built wheel's
-               METADATA, not just off setup.py.
+               marker), leaving util/hsvd.py on the vendored backend; a uv
+               dry-run for x86_64-manylinux_2_28 / py3.8 does pick up
+               hlsvdpro 2.0.0, i.e. the extra is live exactly on the
+               configuration it exists for. The published metadata was read back
+               out of the built wheel's METADATA, not just off setup.py.
     Resolves:  C5
     Supersedes: D1's placement, not its content — the marker moves verbatim from
                install_requires to the `hlsvd` extra. The arm64 install problem D1
