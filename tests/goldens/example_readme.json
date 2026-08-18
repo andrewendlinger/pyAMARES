@@ -230,13 +230,16 @@
     }
   },
   "tolerances": {
-    "default_rtol": 0.005,
+    "default_rtol": 0.0001,
     "default_atol": 0.0,
     "per_column": {
       "chem shift(ppm)": {
-        "atol": 5e-05
+        "atol": 1e-06
+      },
+      "CRLB(cs%) ": {
+        "rtol": 0.001
       }
     },
-    "comment": "default_rtol loosened 1e-4 -> 5e-3 on 2026-08-18: this case (16-metabolite real-data fit) drifts up to 2.30e-3 relative between macOS arm64 (capture platform, Accelerate) and linux x86_64 (OpenBLAS) \u2014 41 cells, worst LW(Hz)/UDPG, identical on every ubuntu leg and independent of the HSVD backend, so pure cross-BLAS drift as anticipated by the corpus design. The chem shift atol override is widened proportionally (1e-6 -> 5e-5); the CRLB(cs%) override (1e-3, looser than the old default) is dropped as the new default now covers it; the synthetic and xmris-shape goldens hold 1e-4 on both platforms and carry the tight signal."
+    "comment": "History: default_rtol was loosened 1e-4 -> 5e-3 on 2026-08-18 to absorb cross-BLAS drift on linux x86_64/OpenBLAS (this case drifts up to ~2.5e-3 relative against the macOS arm64/Accelerate capture; 44 cells over 1e-4 in the final CI measurement, worst LW(Hz)/UDPG). Reverted to the tight defaults the same day, once platform-matched golden selection (PR #19) landed and the reviewed tests/goldens/linux-x86_64/ set was committed: linux legs now compare against their own platform's capture, so this file is only ever read on darwin-arm64, where it is exact. Frozen values untouched throughout \u2014 both edits were tolerance-only."
   }
 }

@@ -1,0 +1,95 @@
+{
+  "meta": {
+    "captured_utc": "2026-08-18T11:14:29Z",
+    "pyamares": "0.4.0",
+    "python": "3.12.13",
+    "numpy": "1.26.4",
+    "pandas": "2.1.4",
+    "scipy": "1.17.1",
+    "lmfit": "1.3.4",
+    "nmrglue": "0.12",
+    "platform": "Linux-6.17.0-1022-azure-x86_64-with-glibc2.39",
+    "machine": "x86_64",
+    "case": "hsvd_vendored_backend"
+  },
+  "nsv_found": 8,
+  "component_fields": [
+    "frequency_hz",
+    "damping",
+    "amplitude",
+    "phase_deg"
+  ],
+  "components": [
+    {
+      "frequency_hz": -1937.4692831171558,
+      "damping": -0.005773288645805879,
+      "amplitude": 2.551968067514047,
+      "phase_deg": 149.35468781128722
+    },
+    {
+      "frequency_hz": -907.6565451453894,
+      "damping": -0.009609393255388279,
+      "amplitude": 3.0386946894641533,
+      "phase_deg": -102.38739427279592
+    },
+    {
+      "frequency_hz": -303.5095412107184,
+      "damping": -0.008294941238200175,
+      "amplitude": 2.9159440978737954,
+      "phase_deg": -31.993429534449294
+    },
+    {
+      "frequency_hz": -0.013539236991889643,
+      "damping": -0.020281990659688134,
+      "amplitude": 4.348910056688666,
+      "phase_deg": 0.09893440109835197
+    },
+    {
+      "frequency_hz": 353.96812503934876,
+      "damping": -0.015884181796540504,
+      "amplitude": 1.2890963200667347,
+      "phase_deg": 38.74934560504352
+    },
+    {
+      "frequency_hz": 421.1973657320673,
+      "damping": -0.01599758534687312,
+      "amplitude": 0.8268753196734038,
+      "phase_deg": 43.49819947687639
+    },
+    {
+      "frequency_hz": 576.8829146142612,
+      "damping": -0.013100596473803058,
+      "amplitude": 0.894979838319526,
+      "phase_deg": 73.98576992864682
+    },
+    {
+      "frequency_hz": 811.9145079400544,
+      "damping": -0.01357805673699065,
+      "amplitude": 2.2309596522827055,
+      "phase_deg": 83.00598689811271
+    }
+  ],
+  "top_singular_values": [
+    439.4621554883989,
+    152.538398849634,
+    147.48764350814608,
+    121.7690427193423,
+    100.002327820222,
+    75.38296090858879,
+    63.07665244944296,
+    57.40987190298065
+  ],
+  "tolerances": {
+    "default_rtol": 1e-09,
+    "default_atol": 0.0,
+    "per_column": {
+      "frequency_hz": {
+        "atol": 1e-09
+      },
+      "phase_deg": {
+        "atol": 1e-08
+      }
+    }
+  },
+  "comment": "Tolerances are measured, not guessed. The runner was compared across six configurations on 2026-08-18: darwin-arm64 py3.12/numpy 1.26.4/scipy 1.17.1 (the capture stack, reference); darwin-arm64 py3.13/numpy 2.5.2/scipy 1.18.0; linux-aarch64 and linux-x86_64 py3.12/numpy 1.26.4/scipy 1.17.1 in containers; linux-x86_64 py3.13/numpy 2.5.2/scipy 1.18.0 in a container; and a real GitHub ubuntu-latest x86_64 runner on py3.12/numpy 1.26.4/scipy 1.17.1 via capture-goldens.yml. nsv_found was 8 in every one. Worst relative deviation over every frozen value and every configuration: 1.1e-10 \u2014 and that maximum belongs entirely to the two near-zero cells (the component at -0.0135 Hz and its 0.0989 deg phase). The worst on any cell where a relative comparison means something is 5.4e-13 (damping), 3.1e-13 (amplitude), 2.6e-13 (phase away from zero), 3.7e-15 (frequency away from zero) and 1.9e-15 (singular values). default_rtol 1e-9 is therefore ~10x the worst measured drift overall and ~1800x the worst meaningful one. The two atol floors absorb the near-zero cells: frequency_hz 1e-9 Hz is ~440x the worst measured absolute frequency drift (2.3e-12 Hz) and still 1e-17 ppm at 120 MHz; phase_deg 1e-8 deg is ~870x the worst measured absolute phase drift (1.1e-11 deg). damping needs no floor \u2014 no component comes near zero (|damping| runs 5.8e-3 to 2.0e-2, worst drift 1800x inside the default). No phase comes near +-180 deg either (max |phase| 149.4 deg), so the comparison is plain rather than angular; an input that put a component on the wrap point would need an angular comparison this golden does not implement. nmrglue is recorded in meta but is not on this case's code path at all \u2014 the vendored backend is pure scipy \u2014 so its version cannot matter here."
+}
