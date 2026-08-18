@@ -102,6 +102,21 @@ SYNTHETIC_GROUND_TRUTH = pd.DataFrame(
 # --- Case C: HSVD ------------------------------------------------------------------
 HSVD_NUM_COMPONENTS = 8
 
+# --- Case D: the vendored HSVD backend, frozen ------------------------------------
+#: Name of the golden that freezes :func:`run_hsvd_vendored_backend_case`. It is not
+#: in :data:`GOLDEN_CASES` because its payload is not a ``result_multiplets`` table.
+HSVD_VENDORED_CASE = "hsvd_vendored_backend"
+
+#: The per-component fields frozen by that golden, in the order the rows carry them.
+#: ``frequency_hz`` and ``damping`` come out of ``convert_hlsvd_result``, which
+#: divides/multiplies by the dwell time it is handed: we pass seconds, so the
+#: frequencies are in Hz and the (negative) damping factors in seconds, not the kHz
+#: and ms the vendored docstring names for a dwell given in ms. ``phase_deg`` is
+#: degrees — converted upstream with a truncated ``180.0/3.1415926``, so it is
+#: about 9e-8 relative off true degrees. Both quirks are upstream behaviour and are
+#: frozen as they are, not corrected here.
+HSVD_COMPONENT_FIELDS = ["frequency_hz", "damping", "amplitude", "phase_deg"]
+
 
 def quiet() -> None:
     """Silence pyAMARES' INFO chatter so a capture or test run stays readable."""
@@ -296,6 +311,59 @@ def run_hsvd_case():
     return {"fidobj": fidobj, "params": params, "table": table}
 
 
+def run_hsvd_vendored_backend_case():
+    """Case D — the vendored pure-Python HSVD backend on the Case A example FID.
+
+    Called **directly**, bypassing ``pyAMARES/util/hsvd.py``'s backend selection:
+    the golden pins the vendored algorithm itself, so it stays meaningful on a
+    stack where ``util/hsvd.py`` would have bound ``hlsvdpro`` instead (x86_64,
+    numpy 1.x, hlsvdpro importable). It is also upstream of ``HSVDinitializer``'s
+    ``curve_fit`` refinement and of its ``dk``/linewidth filtering, so what is
+    frozen here is the decomposition, not the initializer's post-processing.
+
+    Components are sorted by frequency rather than left in the backend's own
+    descending-singular-value order: two singular values can be near-ties, and a
+    swap between them across dependency stacks would look like a total mismatch
+    on every field. The example FID's components are well separated in frequency
+    (nearest pair ~67 Hz apart), so that ordering is stable.
+
+    The wrapper returns the *full* singular-value spectrum of the Hankel matrix
+    (hundreds of values), not ``nsv_found`` of them; only the largest
+    :data:`HSVD_NUM_COMPONENTS` — the ones that carry the model — are returned.
+
+    Returns
+    -------
+    dict
+        ``nsv_found`` (int), ``components`` (DataFrame of
+        :data:`HSVD_COMPONENT_FIELDS`, one row per component, frequency-sorted,
+        integer-indexed) and ``top_singular_values`` (descending ndarray).
+    """
+    quiet()
+    from pyAMARES.libs import hlsvd as vendored_hlsvd
+
+    fid = pyAMARES.readmrs(EXAMPLE_FID_PATH)
+    nsv_found, singular_values, frequencies, dampings, amplitudes, phases = (
+        vendored_hlsvd.hlsvd(fid, HSVD_NUM_COMPONENTS, 1.0 / EXAMPLE_SW)
+    )
+    columns = {
+        "frequency_hz": np.asarray(frequencies, dtype=float),
+        "damping": np.asarray(dampings, dtype=float),
+        "amplitude": np.asarray(amplitudes, dtype=float),
+        "phase_deg": np.asarray(phases, dtype=float),
+    }
+    order = np.argsort(columns["frequency_hz"], kind="stable")
+    components = pd.DataFrame(
+        {field: columns[field][order] for field in HSVD_COMPONENT_FIELDS}
+    )
+    components.index = range(len(components))
+    top = np.sort(np.asarray(singular_values, dtype=float))[::-1][:HSVD_NUM_COMPONENTS]
+    return {
+        "nsv_found": int(nsv_found),
+        "components": components,
+        "top_singular_values": top,
+    }
+
+
 _SYNTHETIC_CACHE: dict = {}
 
 
@@ -322,6 +390,12 @@ GOLDEN_CASES = {
     "example_xmris_shape": run_example_xmris_shape_case,
     "synthetic_noise1_gfree": lambda: synthetic_variant_result("noise1_gfree")[0],
 }
+
+#: Every golden name, whatever the payload shape: the ``result_multiplets`` fit
+#: cases plus the vendored-HSVD-backend case. ``tests/goldens/`` (and each of its
+#: platform subdirectories) is checked against this set, and ``capture_goldens.py``
+#: validates ``--only`` against it.
+ALL_GOLDEN_NAMES = frozenset(GOLDEN_CASES) | {HSVD_VENDORED_CASE}
 
 _CASE_CACHE: dict = {}
 

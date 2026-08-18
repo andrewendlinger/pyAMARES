@@ -156,10 +156,10 @@ def test_every_golden_file_has_a_case():
         os.path.splitext(os.path.basename(p))[0]
         for p in glob.glob(os.path.join(rc.GOLDENS_DIR, "*.json"))
     }
-    assert on_disk == set(rc.GOLDEN_CASES), (
-        "tests/goldens/ and regression_cases.GOLDEN_CASES disagree.\n"
-        f"  only on disk: {sorted(on_disk - set(rc.GOLDEN_CASES))}\n"
-        f"  only in code: {sorted(set(rc.GOLDEN_CASES) - on_disk)}"
+    assert on_disk == set(rc.ALL_GOLDEN_NAMES), (
+        "tests/goldens/ and the case set in regression_cases disagree.\n"
+        f"  only on disk: {sorted(on_disk - set(rc.ALL_GOLDEN_NAMES))}\n"
+        f"  only in code: {sorted(set(rc.ALL_GOLDEN_NAMES) - on_disk)}"
     )
 
 
@@ -194,7 +194,7 @@ def test_platform_golden_dirs_are_named_and_populated_correctly():
             problems.append(f"  {entry}/: non-golden file(s) {stray}")
         orphans = sorted(
             {os.path.splitext(n)[0] for n in names if n.endswith(".json")}
-            - set(rc.GOLDEN_CASES)
+            - set(rc.ALL_GOLDEN_NAMES)
         )
         if orphans:
             problems.append(f"  {entry}/: golden(s) with no case {orphans}")
@@ -486,6 +486,94 @@ def test_hsvd_backend_selection():
         f"numpy {np.__version__} (major {numpy_major}), hlsvdpro importable="
         f"{hlsvdpro_importable} should select {expected!r}, but util/hsvd.py bound "
         f"{hsvd_module.hlsvd.__name__!r}"
+    )
+
+
+# --------------------------------------------------------------------------------
+# Case D — the vendored HSVD backend, frozen
+# --------------------------------------------------------------------------------
+
+
+def test_hsvd_vendored_backend_matches_golden():
+    """The vendored pure-Python HSVD decomposition still returns the frozen numbers.
+
+    Unlike the structural Case C tests above, this one *does* freeze values — but
+    of ``pyAMARES.libs.hlsvd.hlsvd`` called directly, so "the two backends differ
+    by design" never applies: whichever backend ``util/hsvd.py`` happens to bind,
+    this test measures the vendored one.
+
+    Tolerances live in the golden and were measured across dependency stacks and
+    platforms; the golden's ``comment`` records the numbers.
+    """
+    golden = load_golden(rc.HSVD_VENDORED_CASE)
+    source = golden["_source_path"]
+    result = rc.run_hsvd_vendored_backend_case()
+
+    # Against the live constant, never against the golden's copy of it.
+    assert golden["component_fields"] == list(rc.HSVD_COMPONENT_FIELDS), (
+        f"{source}: the golden freezes {golden['component_fields']} but "
+        f"regression_cases.HSVD_COMPONENT_FIELDS says "
+        f"{list(rc.HSVD_COMPONENT_FIELDS)} — re-capture the golden."
+    )
+    assert result["nsv_found"] == golden["nsv_found"], (
+        f"{source}: the vendored HSVD backend found {result['nsv_found']} singular "
+        f"value(s), the golden froze {golden['nsv_found']}"
+    )
+
+    components = result["components"]
+    assert len(components) == len(golden["components"]), (
+        f"{source}: the backend returned {len(components)} component(s), the golden "
+        f"froze {len(golden['components'])} — the rest of the comparison is "
+        "meaningless, so it is not attempted."
+    )
+
+    tol = golden["tolerances"]
+    per_field = tol.get("per_field", {})
+
+    def tolerances_for(field):
+        entry = per_field.get(field, {})
+        return (
+            entry.get("rtol", tol["default_rtol"]),
+            entry.get("atol", tol["default_atol"]),
+        )
+
+    mismatches = []
+
+    def check(label, field, expected, actual):
+        rtol, atol = tolerances_for(field)
+        if np.isclose(actual, expected, rtol=rtol, atol=atol, equal_nan=True):
+            return
+        rel = abs(actual - expected) / abs(expected) if expected else float("nan")
+        mismatches.append(
+            f"  {label:28s} expected {expected!r} got {actual!r} "
+            f"(rel {rel:.3e}, abs {abs(actual - expected):.3e}, "
+            f"rtol {rtol:.1e} atol {atol:.1e})"
+        )
+
+    for row, expected_row in enumerate(golden["components"]):
+        for field in rc.HSVD_COMPONENT_FIELDS:
+            check(
+                f"component[{row}].{field}",
+                field,
+                float(expected_row[field]),
+                float(components.at[row, field]),
+            )
+
+    expected_sv = golden["top_singular_values"]
+    actual_sv = result["top_singular_values"]
+    assert len(actual_sv) == len(expected_sv), (
+        f"{source}: {len(actual_sv)} singular value(s) returned, "
+        f"{len(expected_sv)} frozen"
+    )
+    for i, (expected, actual) in enumerate(zip(expected_sv, actual_sv)):
+        check(f"singular_value[{i}]", "top_singular_values", expected, float(actual))
+
+    assert not mismatches, (
+        f"{rc.HSVD_VENDORED_CASE}: {len(mismatches)} frozen value(s) drifted against "
+        f"{source} (captured on {golden['meta']['python']}/"
+        f"numpy {golden['meta']['numpy']}/scipy {golden['meta']['scipy']}/"
+        f"{golden['meta']['machine']}, running on numpy {np.__version__}/"
+        f"{rc.platform_goldens_key()}):\n" + "\n".join(mismatches)
     )
 
 
