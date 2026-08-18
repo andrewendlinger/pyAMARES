@@ -456,6 +456,16 @@ Not commitments. Recorded so the cost is known when the question comes up.
                and hlsvdpro is dead weight under numpy>=2, where util/hsvd.py
                never imports it at all (D1's note) — the new default resolution
                therefore installs an x86_64 binary that nothing loads.
+    Update (2026-08-18, found wiring the regression CI): hlsvdpro is now dead
+               weight on *every* stack, not just numpy>=2. hlsvdpro 2.0.0 does
+               `import pkg_resources` at module scope, and setuptools >=82
+               removed pkg_resources — so on any current environment it
+               installs but fails to import (`ModuleNotFoundError`), and
+               util/hsvd.py's except-ImportError silently binds the vendored
+               backend. Verified on real linux/amd64: import succeeds only
+               with `setuptools<82` force-installed. The 0.5.0 slimming case
+               for dropping the marker entirely is therefore stronger than
+               when this entry was written.
     Cost:      import-graph verification. `import pyAMARES` is eager (kernel/fid.py
                and libs/MPFIR.py pull nmrglue and matplotlib at import time), so a
                demotion that misses one module turns a missing extra into a fatal

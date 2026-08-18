@@ -1,0 +1,124 @@
+name: Test Regression Corpus
+
+# Runs the numeric regression corpus (tests/test_regression.py +
+# tests/test_api_surface.py) across the dependency stacks the fork claims to
+# support. The goldens under tests/goldens/ were captured on the `old-stack`
+# combination (py3.12 / numpy 1.26.4 / pandas 2.1.4); every other leg is the
+# claim that those numbers survive a newer stack.
+#
+# Why each leg pins, and pins *after* `pip install -e .`: installing the
+# package first and overriding the stack second means resolution can never
+# quietly land on a newer numpy or pandas than the leg is meant to exercise —
+# a leg that ran on the wrong stack would be worse than no leg at all.
+#
+# On hlsvdpro: setup.py's PEP 508 marker installs it on the four ubuntu legs
+# (x86_64) and never on the macos one (arm64, no wheel). It is *reported*, not
+# asserted, because installed no longer implies importable — see the comment on
+# the backend step below. util/hsvd.py's own try/except is what keeps that from
+# mattering, and the report step is what keeps it from being invisible.
+
+on:
+  workflow_call:
+
+jobs:
+  regression:
+    name: ${{ matrix.id }} (${{ matrix.os }}, py${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # The stack the goldens were captured against.
+          - id: old-stack
+            os: ubuntu-latest
+            python-version: '3.12'
+            pins: "'numpy==1.26.4' 'pandas==2.1.4'"
+          # The window the old `pandas<2.2` cap used to exclude.
+          - id: pandas-22
+            os: ubuntu-latest
+            python-version: '3.12'
+            pins: "'numpy==1.26.4' 'pandas==2.2.*'"
+          # numpy 2 while pandas is still 2.x.
+          - id: numpy2
+            os: ubuntu-latest
+            python-version: '3.13'
+            pins: "'numpy>=2,<3' 'pandas~=2.3.0'"
+          # Newest interpreter, newest pandas major.
+          - id: pandas-3
+            os: ubuntu-latest
+            python-version: '3.14'
+            pins: "'pandas>=3,<3.1'"
+          # arm64: setup.py's hlsvdpro marker excludes this platform outright, and
+          # it is the configuration every Apple Silicon dev machine (and every
+          # xmris user on one) actually runs. Deliberately unpinned — plain
+          # resolution is the point.
+          - id: arm64
+            os: macos-latest
+            python-version: '3.13'
+            pins: ''
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install package
+        run: |
+          python -m pip install --upgrade pip setuptools wheel
+          python -m pip install -e .
+
+      - name: Pin the stack
+        if: matrix.pins != ''
+        # `-e .` is named again on purpose, so the pins bind a full re-resolution
+        # of the dependency set rather than being dropped on top of an already
+        # resolved environment. numpy is not an island: a bare
+        # `pip install numpy==1.26.4` leaves behind the scipy that the first
+        # install picked (1.18, which requires numpy>=2 and reaches for
+        # `np.long`), and the package stops importing. Naming the package lets
+        # pip backtrack every dependent onto a version the pins allow — scipy
+        # lands on 1.17.1 on the old-stack leg.
+        run: python -m pip install -e . ${{ matrix.pins }}
+
+      - name: Check the environment is internally consistent
+        # Catches the failure mode above loudly, before any test runs — a leg
+        # whose stack does not hang together is not evidence about anything.
+        run: python -m pip check
+
+      - name: Install pytest
+        run: python -m pip install pytest
+
+      - name: Print the resolved stack
+        run: |
+          python -c "import sys, numpy, pandas, scipy, lmfit, nmrglue; print('python', sys.version); print('numpy', numpy.__version__); print('pandas', pandas.__version__); print('scipy', scipy.__version__); print('lmfit', lmfit.__version__); print('nmrglue', nmrglue.__version__)"
+
+      # Reported, never asserted — see the note at the top of this file. On the
+      # ubuntu legs hlsvdpro *installs* (x86_64 satisfies setup.py's marker) but
+      # no longer *imports*: hlsvdpro 2.0.0 does `import pkg_resources` at module
+      # scope, and setuptools >= 82 dropped pkg_resources. util/hsvd.py catches
+      # that ImportError and falls back to the vendored backend, which is why the
+      # corpus stays green. Printing the three facts (installed / importable /
+      # what got bound) puts the whole decision in the log, so the day hlsvdpro
+      # starts or stops importing, the diff in this step says so.
+      - name: Report the HSVD backend selection
+        run: |
+          python -c "
+          import importlib.util
+          print('hlsvdpro installed:', importlib.util.find_spec('hlsvdpro') is not None)
+          try:
+              import hlsvdpro  # noqa: F401
+              print('hlsvdpro importable: True')
+          except ImportError as exc:
+              print('hlsvdpro importable: False ->', exc)
+          import pyAMARES.util.hsvd as hsvd
+          print('util/hsvd.py bound:', hsvd.hlsvd.__name__)
+          "
+
+      - name: Run the regression corpus
+        # The one supported invocation, per the header of tests/test_regression.py.
+        # `-o addopts=""` neutralizes pytest.ini's --nbval-lax, which errors out
+        # in an environment without nbval.
+        run: pytest tests/test_regression.py tests/test_api_surface.py -o addopts="" -v
