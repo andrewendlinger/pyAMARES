@@ -491,7 +491,9 @@ recording this was added.
 ## D18 — the runtime dependency list is slimmed to what the package imports
 
     Status:    shipped in 0.5.0
-    Symptom:   `pip install pyamares-xmris` resolved 62 packages on py3.13 for a
+    Symptom:   `pip install pyamares-xmris` resolved 62 packages on py3.13 (the
+               resolver's count; the installed venv holds 64 distributions once
+               pip and wheel are included — the Evidence figure below) for a
                library whose own imports are numpy/scipy/pandas/matplotlib/
                lmfit/sympy/nmrglue. A Jupyter stack (ipython, ipykernel, the two
                ipywidgets marker lines), an HTTP client (requests) and two file
@@ -1010,21 +1012,25 @@ not merely that the fit converged.
 
 The 0.5.0 release (D17–D20) re-verified the grown corpus rather than the table above:
 
-- Every CI leg is green on the release tip — the five regression legs (the golden stack,
-  pandas 2.2 and pandas 3 under numpy 1.26.4/2.5.2 on ubuntu, plus unpinned macOS arm64),
-  the 15-leg install matrix (3 OSes × py3.8/3.10/3.12/3.13/3.14, now asserting the bare
-  install stays bare and lazy), the `[jupyter]` extras legs, the notebook suite on
-  py3.8–3.14, and the new `uv build` + `twine check` job.
+- Every CI leg is green on the release tip — the five regression legs (the golden stack
+  py3.12 / numpy 1.26.4 / pandas 2.1.4; pandas 2.2.* under numpy 1.26.4 on py3.12;
+  pandas ~=2.3.0 under numpy >=2,<3 on py3.13; pandas >=3,<3.1 with an unpinned numpy on
+  py3.14; and unpinned macOS arm64 — the pins are the workflow's, resolver-floating
+  elsewhere), the 15-leg install matrix (3 OSes × py3.8/3.10/3.12/3.13/3.14, now asserting
+  the bare install stays bare and lazy), the `[jupyter]` extras legs, the notebook suite
+  on py3.8/3.9/3.11–3.14 (3.10 is exercised by the install matrix, not the notebook
+  suite), and the new `uv build` + `twine check` job.
 - Local scratch-venv runs: the golden stack (py3.12 / numpy 1.26.4 / pandas 2.1.4 /
   scipy 1.17.1), unpinned py3.13 (numpy 2.5.2 / pandas 3.0.5 / scipy 1.18.0), and
   py3.8 at the floor (numpy 1.24.4 / pandas 2.0.3) — all green; py3.8/3.9 skip only
   version-gated guard tests (`sys.stdlib_module_names`, `tomllib`).
-- Goldens are now **platform-matched**: the canonical arm64 set (frozen, 0.3.33 stack)
-  is byte-identical to 0.4.0's, and linux legs compare against the reviewed
+- Goldens are now **platform-matched**: every frozen numeric value in the canonical
+  arm64 set (0.3.33 stack) is unchanged from 0.4.0 — the single canonical-file edit in
+  0.5.0 is tolerance-only, on `example_readme` — and linux legs compare against the reviewed
   `tests/goldens/linux-x86_64/` capture (same golden stack, ubuntu). The canonical
   `example_readme` tolerance is back at the tight defaults; only the linux override of
   that one case carries a measured 5e-3 (pandas 2.2.x excites its soft modes at
   ~2.5e-3 on that platform — documented in the file). The vendored-HSVD golden holds
   rtol 1e-9 everywhere.
-- None of D17–D20 is a numeric change: the frozen goldens are byte-identical before
+- None of D17–D20 is a numeric change: every frozen golden value is identical before
   and after each of them.
