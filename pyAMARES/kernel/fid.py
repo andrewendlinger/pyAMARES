@@ -240,14 +240,16 @@ def fft_params(timeaxis, params, fid=False, return_mat=False):
     Returns:
         numpy.ndarray: Depending on the arguments, either raw FID signals, uninterleaved FID signals, or the FFT spectra of the FID signals.
     """
-    import nmrglue as ng
-
     # Return raw FID signals if return_mat is True
     # parmas is the lmfit Parameters() style
     if return_mat:
         return multieq6(params, timeaxis, return_mat=return_mat)
     if fid:
         return uninterleave(multieq6(params, timeaxis, return_mat=return_mat))
+    # Imported here, below the early returns: the return_mat / fid branches above are
+    # the ones a headless fit takes, and they must not pay the nmrglue import (D17).
+    import nmrglue as ng
+
     # spec = np.fft.fftshift(np.fft.fft((uninterleave(multieq6(params, timeaxis)))))
     spec = ng.proc_base.fft((uninterleave(multieq6(params, timeaxis))))
     return spec

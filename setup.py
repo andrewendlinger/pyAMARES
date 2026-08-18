@@ -85,7 +85,9 @@ install_requires = [
     "scipy>=1.2.1",
     "sympy",
     # 0.12 replaced np.dtype('a8') with np.dtype('S8'); anything older fails to
-    # import under numpy 2, and pyAMARES imports nmrglue eagerly. See D16.
+    # import under numpy 2. The floor is still required after D17 made the import
+    # lazy -- laziness only moves the failure from `import pyAMARES` to the first
+    # ng.proc_base call, which is harder to diagnose, not less fatal. See D16.
     "nmrglue>=0.12",
     "xlrd",
     "jinja2",

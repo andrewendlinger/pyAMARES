@@ -1,6 +1,5 @@
 import re
 
-import matplotlib.pyplot as plt
 import numpy as np
 import scipy
 import sympy
@@ -158,6 +157,8 @@ def evaluateCRB(outparams, opts, P=None, Jacfunc=Jac6, verbose=False):
             )
 
     if verbose:
+        import matplotlib.pyplot as plt
+
         # print("opts.D.shape=%s" % str(opts.D.shape))
         logger.debug("opts.D.shape=%s" % str(opts.D.shape))
         plt.plot(opts.residual.real)
@@ -250,6 +251,8 @@ def create_pmatrix(pkpd, verbose=False, ifplot=False):
 
         Pmatrix[y, x] = partial_d
     if ifplot:
+        import matplotlib.pyplot as plt
+
         plt.title("Prior Knowledge Matrix")
         plt.imshow(Pmatrix, aspect="auto")
         plt.ylabel("Free parameters")
