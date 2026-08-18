@@ -89,4 +89,4 @@ jobs:
 
       - name: Verify everything the extra promises imports
         run: |
-          python -c "import pyAMARES, mat73, requests, IPython, ipywidgets, openpyxl, xlrd, notebook"
+          python -c "import pyAMARES, mat73, requests, IPython, ipykernel, ipywidgets, openpyxl, xlrd, notebook"
