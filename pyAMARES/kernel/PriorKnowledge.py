@@ -610,7 +610,7 @@ def initialize_FID(
 
     opts = argparse.Namespace()
     opts.deadtime = deadtime
-    opts.timeaxis = np.arange(0, dwelltime * fidpt, dwelltime) + deadtime
+    opts.timeaxis = np.arange(fidpt, dtype=float) * dwelltime + deadtime
     # opts.timeaxis = np.linspace(deadtime, at, fidpt)
     opts.carrier = carrier  # 4.7 for water, 0 for PCr
     if flip_axis:
