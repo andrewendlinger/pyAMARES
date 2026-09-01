@@ -819,6 +819,30 @@ recording this was added.
 
 ---
 
+# D — Divergences (unreleased)
+
+## D22 — `initialize_FID`'s time axis is built by integer indexing, not `np.arange`
+
+    Status:    unreleased
+    Symptom:   `opts.timeaxis` occasionally comes out one element longer than
+               `fidpt`, causing shape-mismatch errors when it is later aligned
+               against FID data of length `fidpt`
+    Cause:     `np.arange(0, dwelltime * fidpt, dwelltime)` uses a
+               floating-point stop bound. `dwelltime * fidpt` cannot always be
+               represented exactly, so it can land fractionally above or below
+               the intended stop; when it lands above, `np.arange` emits one
+               extra element. The failure is intermittent — it depends on the
+               specific `dwelltime`/`fidpt` values, not on a code path.
+    Change:    `opts.timeaxis = np.arange(fidpt, dtype=float) * dwelltime + deadtime`
+               — the array length is now driven by the integer `fidpt` directly,
+               so it is exactly `fidpt` regardless of floating-point rounding.
+    Behaviour: identical values for every case where the old `np.arange` call
+               already returned `fidpt` elements; fixes the cases where it
+               returned `fidpt + 1`.
+    Origin:    issue #25 (andrewendlinger/pyAMARES)
+
+---
+
 # C — Candidates (undecided)
 
 Not commitments. Recorded so the cost is known when the question comes up.
